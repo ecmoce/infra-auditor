@@ -104,6 +104,83 @@ export interface HealthStatus {
   last_report_received: string | null;
 }
 
+/* ─── Anomaly Types ─────────────────────────────────── */
+
+export interface ConfigDriftGroup {
+  role: string;
+  server_count: number;
+  servers: { server_id: string; hostname: string; region: string }[];
+  mismatches: ConfigMismatch[];
+  mismatch_count: number;
+}
+
+export interface ConfigMismatch {
+  rule: string;
+  expected_status: string;
+  severity: string;
+  deviating_servers: { server_id: string; status: string; actual: unknown; expected: unknown }[];
+  conforming_servers: { server_id: string; status: string }[];
+  total_checked: number;
+}
+
+export interface ConfigDriftResponse {
+  groups: ConfigDriftGroup[];
+  total_mismatches: number;
+}
+
+export interface RegionComparisonEntry {
+  region: string;
+  server_count: number;
+  average_compliance: number;
+  min_compliance: number;
+  max_compliance: number;
+  score_variance: number;
+  critical_issues: number;
+  warning_issues: number;
+  roles: { role: string; servers: number; average_score: number }[];
+}
+
+export interface CrossRegionDrift {
+  role: string;
+  drift_percentage: number;
+  best_region: string;
+  best_score: number;
+  worst_region: string;
+  worst_score: number;
+  all_regions: Record<string, number>;
+}
+
+export interface RegionComparisonResponse {
+  regions: RegionComparisonEntry[];
+  best_region: { name: string; score: number } | null;
+  worst_region: { name: string; score: number } | null;
+  cross_region_drift: CrossRegionDrift[];
+}
+
+export interface Alert {
+  severity: "critical" | "warning";
+  type: string;
+  server_id: string | null;
+  hostname: string | null;
+  region: string | null;
+  role: string | null;
+  message: string;
+  value: number;
+  threshold: number;
+}
+
+export interface AlertsResponse {
+  alerts: Alert[];
+  summary: { total: number; critical: number; warning: number };
+}
+
+export interface AlertThresholds {
+  critical_score: number;
+  warning_score: number;
+  critical_issues_threshold: number;
+  drift_threshold: number;
+}
+
 /* ─── API Functions ─────────────────────────────────── */
 
 export const api = {
@@ -130,4 +207,29 @@ export const api = {
     ),
 
   getHealth: () => request<HealthStatus>("/health"),
+
+  // Anomaly detection
+  getConfigDrift: (params?: { role?: string; region?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.role) sp.set("role", params.role);
+    if (params?.region) sp.set("region", params.region);
+    const qs = sp.toString();
+    return request<ConfigDriftResponse>(`/anomaly/config-drift${qs ? `?${qs}` : ""}`);
+  },
+
+  getRegionComparison: () => request<RegionComparisonResponse>("/anomaly/region-comparison"),
+
+  getAlerts: (params?: { severity?: string; region?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.severity) sp.set("severity", params.severity);
+    if (params?.region) sp.set("region", params.region);
+    const qs = sp.toString();
+    return request<AlertsResponse>(`/anomaly/alerts${qs ? `?${qs}` : ""}`);
+  },
+
+  updateThresholds: (thresholds: Partial<AlertThresholds>) =>
+    request<{ thresholds: AlertThresholds }>("/anomaly/thresholds", {
+      method: "PUT",
+      body: JSON.stringify(thresholds),
+    }),
 };

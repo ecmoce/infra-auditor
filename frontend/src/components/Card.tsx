@@ -10,7 +10,7 @@ export function Card({
 }: {
   children: ReactNode;
   className?: string;
-  title?: string;
+  title?: ReactNode;
   subtitle?: string;
   action?: ReactNode;
 }) {

@@ -5,6 +5,9 @@ const links = [
   { to: "/", label: "Mission Control", icon: "🎯" },
   { to: "/compliance", label: "Compliance", icon: "📊" },
   { to: "/servers", label: "Servers", icon: "🖥️" },
+  { to: "/regions", label: "Regions", icon: "🌍" },
+  { to: "/config-drift", label: "Config Drift", icon: "🔍" },
+  { to: "/alerts", label: "Alerts", icon: "🔔" },
 ] as const;
 
 export function Layout() {

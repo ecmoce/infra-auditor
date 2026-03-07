@@ -14,7 +14,7 @@ from aggregator import __version__
 from aggregator.config import Settings
 from aggregator.database import Database
 from aggregator.middleware import APIKeyMiddleware, RateLimitMiddleware
-from aggregator.api import reports, dashboard, compliance, health, drift, remediation
+from aggregator.api import reports, dashboard, compliance, health, drift, remediation, anomaly
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
@@ -64,6 +64,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(drift.router)
     app.include_router(remediation.router)
+    app.include_router(anomaly.router)
 
     # ── Static frontend serving ────────────────────────────
     frontend_dir = os.getenv(
