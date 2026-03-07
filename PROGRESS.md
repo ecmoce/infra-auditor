@@ -11,7 +11,7 @@
 | Phase 3 | ✅ 완료 | #6 | Aggregator Server + REST API |
 | Phase 4 | ✅ 완료 | #7 | Web UI Dashboard |
 | Phase 5 | ✅ 완료 | #8 | Docker + CI/CD |
-| Phase 6 | 🔄 진행중 | - | Docker 통합 테스트 + 규칙 검증 |
+| Phase 6 | ✅ 완료 | #9 | Docker 통합 테스트 + 규칙 검증 |
 | Phase 7 | ⭕ 예정 | - | Drift Detection + Remediation |
 | Phase 8 | ⭕ 예정 | - | 멀티 리전 + 이상치 탐지 |
 | Phase 9 | ⭕ 예정 | - | 보안 + 문서화 + 최종 검증 |
@@ -50,13 +50,13 @@
 - GitHub Actions CI (lint + test)
 - Makefile 자동화
 
-### Phase 6: Docker 통합 테스트 + 규칙 검증 🔄
-- [ ] docker compose up 전체 스택 실행
-- [ ] Agent → Aggregator 리포트 전송 검증
-- [ ] 4개 OS에서 collector 실제 값 수집 확인
-- [ ] role_rules.py ↔ RULES.md 일치 검증
-- [ ] Frontend ↔ API 실제 연동 확인
-- [ ] .gitignore 정리 (node_modules, .venv 제거)
+### Phase 6: Docker 통합 테스트 + 규칙 검증 ✅
+- [x] docker compose up 전체 스택 실행
+- [x] Agent → Aggregator 리포트 전송 검증 (4개 서버 성공)
+- [x] 4개 OS에서 collector 실제 값 수집 확인 (컨테이너 환경 제약 고려)
+- [x] role_rules.py ↔ RULES.md 일치 검증 (누락 규칙 추가)
+- [x] Frontend ↔ API 실제 연동 확인 (3% compliance, 4 critical, 32 warning)
+- [x] .gitignore 정리 (불필요한 파일 제거)
 
 ### Phase 7: Drift Detection + Remediation ⭕
 - [ ] 이전 스캔 결과 저장 및 비교
@@ -97,7 +97,7 @@
 |---|------|------|
 | 1 | 03/07 16:47 | Phase 1 설계 DR 시작 |
 | 1 | 03/07 21:00 | Phase 2-5 전체 구현 완료 |
-| 2 | 03/08 00:33 | Phase 6 시작 (Docker 통합 테스트) |
+| 2 | 03/08 00:33 | Phase 6 완료 (Docker 통합 테스트 + 규칙 검증) |
 | 3 | 예정 | Phase 6 결과 반영 + Phase 7 |
 | 4 | 예정 | Phase 7-8 |
 | 5 | 예정 | Phase 8-9 최종 검증 |
