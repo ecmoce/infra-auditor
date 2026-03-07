@@ -1,0 +1,12 @@
+.git
+.github
+.pytest_cache
+.coverage
+htmlcov/
+__pycache__
+*.pyc
+*.egg-info
+.venv
+node_modules
+frontend/node_modules
+*.db

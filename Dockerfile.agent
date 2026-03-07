@@ -1,0 +1,47 @@
+# Multi-stage: install agent on various OS bases
+# Usage: docker build --build-arg BASE_IMAGE=ubuntu:22.04 -f Dockerfile.agent .
+
+ARG BASE_IMAGE=ubuntu:22.04
+
+# Stage 1: Build wheel only (pure Python, no native deps)
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+COPY pyproject.toml ./
+COPY infra_auditor/ ./infra_auditor/
+RUN pip wheel --no-deps --wheel-dir /wheels .
+
+# Stage 2: Target OS
+FROM ${BASE_IMAGE}
+
+# Install Python based on distro
+RUN if [ -f /etc/centos-release ] && grep -q "release 7" /etc/centos-release 2>/dev/null; then \
+        sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo && \
+        sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo && \
+        yum install -y python3 python3-pip && yum clean all; \
+    elif command -v apt-get >/dev/null 2>&1; then \
+        apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
+        rm -rf /var/lib/apt/lists/*; \
+    elif command -v dnf >/dev/null 2>&1; then \
+        dnf install -y python3 python3-pip && dnf clean all; \
+    fi
+
+WORKDIR /opt/infra-auditor
+
+# Install click (compatible with system Python) then the agent wheel (no-deps)
+COPY --from=builder /wheels /wheels
+RUN pip3 install --no-cache-dir --break-system-packages click 2>/dev/null || \
+    pip3 install --no-cache-dir click
+RUN pip3 install --no-cache-dir --no-deps --break-system-packages /wheels/infra_auditor*.whl 2>/dev/null || \
+    pip3 install --no-cache-dir --no-deps /wheels/infra_auditor*.whl
+
+COPY scripts/agent-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV AGGREGATOR_URL=http://aggregator:8443
+ENV SERVER_ID=""
+ENV SCAN_ROLE=auto
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,25 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir ".[server]"
+
+# Copy application code
+COPY aggregator/ ./aggregator/
+COPY infra_auditor/ ./infra_auditor/
+
+# Install the package
+RUN pip install --no-cache-dir -e .
+
+ENV INFRA_AUDITOR_HOST=0.0.0.0
+ENV INFRA_AUDITOR_PORT=8443
+ENV INFRA_AUDITOR_DB_PATH=/data/infra_auditor.db
+ENV INFRA_AUDITOR_DEBUG=true
+
+EXPOSE 8443
+
+VOLUME /data
+
+CMD ["python", "-m", "aggregator"]

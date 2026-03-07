@@ -1,0 +1,103 @@
+services:
+  aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile.aggregator
+    ports:
+      - "8443:8443"
+    volumes:
+      - aggregator-data:/data
+    environment:
+      - INFRA_AUDITOR_DEBUG=true
+      - INFRA_AUDITOR_DB_PATH=/data/infra_auditor.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8443/api/v1/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - infra-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - infra-net
+
+  agent-ubuntu22:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        BASE_IMAGE: ubuntu:22.04
+    environment:
+      - SERVER_ID=test-ubuntu22
+      - SCAN_ROLE=auto
+      - AGGREGATOR_URL=http://aggregator:8443
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - infra-net
+
+  agent-ubuntu24:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        BASE_IMAGE: ubuntu:24.04
+    environment:
+      - SERVER_ID=test-ubuntu24
+      - SCAN_ROLE=auto
+      - AGGREGATOR_URL=http://aggregator:8443
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - infra-net
+
+  agent-centos7:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        BASE_IMAGE: centos:7
+    environment:
+      - SERVER_ID=test-centos7
+      - SCAN_ROLE=auto
+      - AGGREGATOR_URL=http://aggregator:8443
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - infra-net
+
+  agent-rocky9:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        BASE_IMAGE: rockylinux:9
+    environment:
+      - SERVER_ID=test-rocky9
+      - SCAN_ROLE=auto
+      - AGGREGATOR_URL=http://aggregator:8443
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - infra-net
+
+volumes:
+  aggregator-data:
+
+networks:
+  infra-net:
+    driver: bridge
