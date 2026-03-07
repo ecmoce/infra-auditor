@@ -1,10 +1,14 @@
 """FastAPI application factory."""
 
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 from aggregator import __version__
 from aggregator.config import Settings
@@ -58,5 +62,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(compliance.router)
     app.include_router(health.router)
+
+    # ── Static frontend serving ────────────────────────────
+    frontend_dir = os.getenv(
+        "INFRA_AUDITOR_FRONTEND_DIR",
+        str(Path(__file__).resolve().parent.parent / "frontend" / "dist"),
+    )
+    if os.path.isdir(frontend_dir):
+        app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            """Serve the SPA index.html for all non-API routes."""
+            file_path = os.path.join(frontend_dir, full_path)
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
+            return FileResponse(os.path.join(frontend_dir, "index.html"))
 
     return app
