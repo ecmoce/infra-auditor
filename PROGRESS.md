@@ -1,6 +1,6 @@
 # infra-auditor 프로젝트 진행 현황
 
-> 마지막 업데이트: 2026-03-08 00:33 KST
+> 마지막 업데이트: 2026-03-08 02:15 KST
 
 ## 📊 전체 요약
 
@@ -12,7 +12,7 @@
 | Phase 4 | ✅ 완료 | #7 | Web UI Dashboard |
 | Phase 5 | ✅ 완료 | #8 | Docker + CI/CD |
 | Phase 6 | ✅ 완료 | #9 | Docker 통합 테스트 + 규칙 검증 |
-| Phase 7 | ⭕ 예정 | - | Drift Detection + Remediation |
+| Phase 7 | ✅ 완료 | #10 | Drift Detection + Remediation |
 | Phase 8 | ⭕ 예정 | - | 멀티 리전 + 이상치 탐지 |
 | Phase 9 | ⭕ 예정 | - | 보안 + 문서화 + 최종 검증 |
 
@@ -58,11 +58,14 @@
 - [x] Frontend ↔ API 실제 연동 확인 (3% compliance, 4 critical, 32 warning)
 - [x] .gitignore 정리 (불필요한 파일 제거)
 
-### Phase 7: Drift Detection + Remediation ⭕
-- [ ] 이전 스캔 결과 저장 및 비교
-- [ ] 변경 항목 하이라이팅
-- [ ] 비준수 항목 → sysctl/config 수정 스크립트 자동 생성
-- [ ] remediation API 엔드포인트
+### Phase 7: Drift Detection + Remediation ✅ (PR #10)
+- [x] DriftDetector: 스캔 결과 저장 및 비교 (호스트별 JSON 히스토리)
+- [x] CLI drift 하이라이팅 (improved/degraded/changed 컬러 코딩)
+- [x] RemediationGenerator: sysctl/config 수정 스크립트 자동 생성 (백업+dry-run)
+- [x] CLI remediate 명령어 (severity/category 필터)
+- [x] Aggregator API: drift/compare, drift/{id}, drift/{id}/history
+- [x] Aggregator API: remediation/generate, remediation/{id}
+- [x] 테스트 41개 추가 (총 134개 통과)
 
 ### Phase 8: 멀티 리전 + 이상치 탐지 ⭕
 - [ ] 4개 리전 동시 뷰
@@ -81,10 +84,10 @@
 
 | 항목 | 값 |
 |------|-----|
-| 소스 코드 | ~5,900줄 |
-| 테스트 | 93개 (전체 통과) |
-| PR 머지 | 4개 |
-| Issues 클로즈 | 4개 |
+| 소스 코드 | ~7,900줄 |
+| 테스트 | 134개 (전체 통과) |
+| PR 머지 | 5개 |
+| Issues 클로즈 | 5개 |
 | 설계 문서 | 5개 |
 | Docker 이미지 | 6개 |
 | 지원 OS | 4개 |
@@ -98,6 +101,6 @@
 | 1 | 03/07 16:47 | Phase 1 설계 DR 시작 |
 | 1 | 03/07 21:00 | Phase 2-5 전체 구현 완료 |
 | 2 | 03/08 00:33 | Phase 6 완료 (Docker 통합 테스트 + 규칙 검증) |
-| 3 | 예정 | Phase 6 결과 반영 + Phase 7 |
-| 4 | 예정 | Phase 7-8 |
-| 5 | 예정 | Phase 8-9 최종 검증 |
+| 3 | 03/08 02:15 | Phase 7 완료 (Drift Detection + Remediation) |
+| 4 | 예정 | Phase 8 |
+| 5 | 예정 | Phase 9 최종 검증 |
