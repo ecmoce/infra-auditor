@@ -14,20 +14,29 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "httpx>=0.24.0",
 ]
 
 [project.scripts]
 infra-auditor = "infra_auditor.cli:main"
+infra-auditor-server = "aggregator.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["infra_auditor*", "aggregator*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["infra_auditor"]
+source = ["infra_auditor", "aggregator"]
 
 [tool.coverage.report]
 show_missing = true
