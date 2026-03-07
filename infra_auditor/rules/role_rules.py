@@ -42,6 +42,24 @@ def _extract_syn_backlog(d):
     )
 
 
+def _extract_swappiness(d):
+    return d.get("memory", {}).get("swappiness", "unknown")
+
+
+def _extract_dirty_ratio(d):
+    return d.get("memory", {}).get("dirty_ratio", "unknown")
+
+
+def _extract_dirty_background_ratio(d):
+    return d.get("memory", {}).get("dirty_background_ratio", "unknown")
+
+
+def _extract_somaxconn(d):
+    return d.get("network", {}).get("sysctl", {}).get(
+        "net.core.somaxconn", "unknown"
+    )
+
+
 # ── Control (Platform) ──
 
 CONTROL_RULES = [
@@ -93,6 +111,39 @@ CONTROL_RULES = [
         score_impact=8,
         value_extractor=_extract_rmem_max,
         comparator=_gte_comparator,
+        roles=["control"],
+    ),
+    Rule(
+        category="network",
+        subcategory="api_server",
+        item="net.core.wmem_max",
+        description="송신 버퍼 최대 크기 (API 서버)",
+        recommended_value="16777216",
+        collection_method="cat /proc/sys/net/core/wmem_max",
+        severity="warning",
+        impact_description="송신 버퍼 부족으로 API 응답 처리 지연",
+        justification="대량 API 트래픽 처리를 위한 송신 버퍼 확장",
+        remediation_command="sysctl -w net.core.wmem_max=16777216",
+        remediation_persistent="echo 'net.core.wmem_max = 16777216' >> /etc/sysctl.conf",
+        score_impact=8,
+        value_extractor=_extract_wmem_max,
+        comparator=_gte_comparator,
+        roles=["control"],
+    ),
+    Rule(
+        category="network",
+        subcategory="api_server",
+        item="net.ipv4.ip_local_port_range",
+        description="로컬 포트 범위 (API 서버)",
+        recommended_value="10000 65535",
+        collection_method="cat /proc/sys/net/ipv4/ip_local_port_range",
+        severity="warning",
+        impact_description="포트 범위 부족으로 동시 연결 수 제한",
+        justification="API 요청 처리를 위한 포트 범위 최적화",
+        remediation_command="sysctl -w net.ipv4.ip_local_port_range='10000 65535'",
+        remediation_persistent="echo 'net.ipv4.ip_local_port_range = 10000 65535' >> /etc/sysctl.conf",
+        score_impact=5,
+        value_extractor=_extract_port_range,
         roles=["control"],
     ),
 ]
@@ -197,6 +248,23 @@ STORAGE_CEPH_RULES = [
     Rule(
         category="memory",
         subcategory="virtual_memory",
+        item="vm.swappiness",
+        description="스왑 사용 적극성 (OSD 보호)",
+        recommended_value="1",
+        collection_method="cat /proc/sys/vm/swappiness",
+        severity="critical",
+        impact_description="높은 swappiness로 인한 OSD 성능 저하",
+        justification="OSD 메모리 보호를 위한 최소 스왑 설정",
+        remediation_command="sysctl -w vm.swappiness=1",
+        remediation_persistent="echo 'vm.swappiness = 1' >> /etc/sysctl.conf",
+        score_impact=20,
+        value_extractor=_extract_swappiness,
+        comparator=_lte_comparator,
+        roles=["storage-ceph"],
+    ),
+    Rule(
+        category="memory",
+        subcategory="virtual_memory",
         item="vm.dirty_ratio",
         description="더티 페이지 비율 (Ceph OSD 최적화)",
         recommended_value="5",
@@ -207,7 +275,7 @@ STORAGE_CEPH_RULES = [
         remediation_command="sysctl -w vm.dirty_ratio=5",
         remediation_persistent="echo 'vm.dirty_ratio = 5' >> /etc/sysctl.conf",
         score_impact=12,
-        value_extractor=lambda d: d.get("memory", {}).get("dirty_ratio", "unknown"),
+        value_extractor=_extract_dirty_ratio,
         comparator=_lte_comparator,
         roles=["storage-ceph"],
     ),
@@ -248,6 +316,73 @@ STORAGE_S3_RULES = [
         score_impact=10,
         value_extractor=lambda d: d.get("memory", {}).get("swappiness", "unknown"),
         comparator=_lte_comparator,
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="memory",
+        subcategory="virtual_memory",
+        item="vm.dirty_ratio",
+        description="더티 페이지 비율 (S3 대용량 오브젝트 최적화)",
+        recommended_value="20",
+        collection_method="cat /proc/sys/vm/dirty_ratio",
+        severity="warning",
+        impact_description="낮은 dirty_ratio로 인한 빈번한 플러시",
+        justification="대량 오브젝트 쓰기 최적화",
+        remediation_command="sysctl -w vm.dirty_ratio=20",
+        remediation_persistent="echo 'vm.dirty_ratio = 20' >> /etc/sysctl.conf",
+        score_impact=10,
+        value_extractor=_extract_dirty_ratio,
+        comparator=_lte_comparator,
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="memory",
+        subcategory="virtual_memory",
+        item="vm.dirty_background_ratio",
+        description="백그라운드 더티 페이지 비율 (S3)",
+        recommended_value="10",
+        collection_method="cat /proc/sys/vm/dirty_background_ratio",
+        severity="warning",
+        impact_description="낮은 배경 플러시로 인한 쓰기 성능 저하",
+        justification="대량 오브젝트 쓰기 시 백그라운드 플러시 여유",
+        remediation_command="sysctl -w vm.dirty_background_ratio=10",
+        remediation_persistent="echo 'vm.dirty_background_ratio = 10' >> /etc/sysctl.conf",
+        score_impact=5,
+        value_extractor=_extract_dirty_background_ratio,
+        comparator=_lte_comparator,
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="network",
+        subcategory="api",
+        item="net.core.somaxconn",
+        description="소켓 연결 대기 큐 (S3 API)",
+        recommended_value="65535",
+        collection_method="cat /proc/sys/net/core/somaxconn",
+        severity="warning",
+        impact_description="연결 대기 큐 부족으로 HTTP 연결 거부",
+        justification="S3 API의 대량 HTTP 연결 처리",
+        remediation_command="sysctl -w net.core.somaxconn=65535",
+        remediation_persistent="echo 'net.core.somaxconn = 65535' >> /etc/sysctl.conf",
+        score_impact=8,
+        value_extractor=_extract_somaxconn,
+        comparator=_gte_comparator,
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="network",
+        subcategory="api",
+        item="net.ipv4.ip_local_port_range",
+        description="로컬 포트 범위 (S3 API)",
+        recommended_value="10000 65535",
+        collection_method="cat /proc/sys/net/ipv4/ip_local_port_range",
+        severity="warning",
+        impact_description="포트 범위 부족으로 S3 동시 연결 수 제한",
+        justification="S3 API 트래픽 처리를 위한 포트 범위 확장",
+        remediation_command="sysctl -w net.ipv4.ip_local_port_range='10000 65535'",
+        remediation_persistent="echo 'net.ipv4.ip_local_port_range = 10000 65535' >> /etc/sysctl.conf",
+        score_impact=5,
+        value_extractor=_extract_port_range,
         roles=["storage-s3"],
     ),
     Rule(
