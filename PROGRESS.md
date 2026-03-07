@@ -1,6 +1,6 @@
 # infra-auditor 프로젝트 진행 현황
 
-> 마지막 업데이트: 2026-03-08 02:15 KST
+> 마지막 업데이트: 2026-03-08 07:15 KST
 
 ## 📊 전체 요약
 
@@ -13,7 +13,7 @@
 | Phase 5 | ✅ 완료 | #8 | Docker + CI/CD |
 | Phase 6 | ✅ 완료 | #9 | Docker 통합 테스트 + 규칙 검증 |
 | Phase 7 | ✅ 완료 | #10 | Drift Detection + Remediation |
-| Phase 8 | ⭕ 예정 | - | 멀티 리전 + 이상치 탐지 |
+| Phase 8 | ✅ 완료 | #12 | 멀티 리전 + 이상치 탐지 |
 | Phase 9 | ⭕ 예정 | - | 보안 + 문서화 + 최종 검증 |
 
 ## 🏗️ Phase 상세
@@ -67,11 +67,14 @@
 - [x] Aggregator API: remediation/generate, remediation/{id}
 - [x] 테스트 41개 추가 (총 134개 통과)
 
-### Phase 8: 멀티 리전 + 이상치 탐지 ⭕
-- [ ] 4개 리전 동시 뷰
-- [ ] 같은 역할 서버 간 설정 불일치 탐지
-- [ ] 리전 간 compliance 비교
-- [ ] 알림 시스템
+### Phase 8: 멀티 리전 + 이상치 탐지 ✅ (PR #12)
+- [x] 4개 리전 동시 뷰 (RegionComparison 페이지, best/worst 리전, cross-region drift)
+- [x] 같은 역할 서버 간 설정 불일치 탐지 (mode 기반 이탈 감지, 표준화 추천)
+- [x] 리전 간 compliance 비교 (리전별 카드, role별 점수, variance 분석)
+- [x] 알림 시스템 (Critical/Warning 수준, 설정 가능 임계값, 리전 drift 알림)
+- [x] 5개 API 엔드포인트 추가
+- [x] 3개 Frontend 페이지 추가
+- [x] 21개 테스트 추가 (총 155개 통과)
 
 ### Phase 9: 보안 + 문서화 + 최종 검증 ⭕
 - [ ] API 인증 (JWT/API Key)
@@ -84,10 +87,10 @@
 
 | 항목 | 값 |
 |------|-----|
-| 소스 코드 | ~7,900줄 |
-| 테스트 | 134개 (전체 통과) |
-| PR 머지 | 5개 |
-| Issues 클로즈 | 5개 |
+| 소스 코드 | ~9,300줄 |
+| 테스트 | 155개 (전체 통과) |
+| PR 머지 | 6개 |
+| Issues 클로즈 | 6개 |
 | 설계 문서 | 5개 |
 | Docker 이미지 | 6개 |
 | 지원 OS | 4개 |
@@ -102,5 +105,5 @@
 | 1 | 03/07 21:00 | Phase 2-5 전체 구현 완료 |
 | 2 | 03/08 00:33 | Phase 6 완료 (Docker 통합 테스트 + 규칙 검증) |
 | 3 | 03/08 02:15 | Phase 7 완료 (Drift Detection + Remediation) |
-| 4 | 예정 | Phase 8 |
+| 4 | 03/08 07:15 | Phase 8 완료 (멀티 리전 + 이상치 탐지) |
 | 5 | 예정 | Phase 9 최종 검증 |
