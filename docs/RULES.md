@@ -4,6 +4,44 @@
 
 각 서버 역할(Control, Compute, Network, Storage-Ceph, Storage-S3)별로 최적화해야 할 OS 설정과 권장값을 정의합니다.
 
+## 규칙 통계 (Phase 6.5 Enhanced)
+
+- **전체 규칙 수**: 62개 (기존 31개 → 100% 증가)
+- **공통 규칙**: 24개 (고급 네트워크, 메모리, 커널 튜닝 포함)
+- **역할별 규칙**: 38개 (KVM/QEMU, Ceph, 고급 네트워크 최적화 포함)
+
+### 새로 추가된 고급 튜닝 영역
+
+#### 네트워크 고급 튜닝 (모든 역할)
+- **RPS/XPS/RFS 설정**: 멀티큐 네트워크 인터페이스 최적화
+- **인터럽트 분산**: IRQ affinity 및 coalescing 설정
+- **연결 추적**: nf_conntrack 대용량 환경 튜닝
+- **TCP 고급 설정**: window scaling, busy polling
+
+#### KVM/QEMU 가상화 튜닝 (Compute 역할)
+- **중첩 가상화**: KVM nested 지원 활성화
+- **CPU 격리**: C-state 제한, CPU pinning 최적화
+- **메모리 최적화**: Hugepages, 오버커밋 정책
+- **NUMA 최적화**: 토폴로지 인식 설정
+
+#### Ceph 스토리지 최적화 (Storage-Ceph 역할)
+- **BlueStore 튜닝**: OSD 메모리 타겟, RocksDB 최적화
+- **I/O 스케줄러**: NVMe none, SSD mq-deadline 설정
+- **네트워크**: 클러스터 통신 버퍼 최적화
+- **파일시스템**: XFS noatime, allocsize 최적화
+
+#### 메모리 관리 고급 (모든 역할)
+- **KSM 활용**: Kernel Same-page Merging 설정
+- **대용량 RAM**: 1-2TB 환경에 맞는 min_free_kbytes
+- **NUMA 최적화**: zone_reclaim 비활성화
+- **THP 정책**: 역할별 transparent hugepages 최적화
+
+#### 커널 고급 튜닝 (모든 역할)
+- **스케줄러**: migration cost, autogroup 설정
+- **안정성**: panic_on_oops, watchdog 설정
+- **I/O 한계**: aio-max-nr, inotify 대용량 설정
+- **cgroup**: v1/v2 감지 및 최적화
+
 ## 공통 기본 규칙
 
 ### CPU 관련

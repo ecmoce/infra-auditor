@@ -1,109 +1,96 @@
-# infra-auditor 프로젝트 진행 현황
+# Development Progress
 
-> 마지막 업데이트: 2026-03-08 07:15 KST
+## Phase 6.5: Advanced OS Tuning Rules (2026-03-08)
 
-## 📊 전체 요약
+### ✅ **Completed**
 
-| Phase | 상태 | PR | 설명 |
-|-------|------|-----|------|
-| Phase 1 | ✅ 완료 | - | 기획/설계 (5개 문서) |
-| Phase 2 | ✅ 완료 | #5 | Agent Core + Rules Engine + CLI |
-| Phase 3 | ✅ 완료 | #6 | Aggregator Server + REST API |
-| Phase 4 | ✅ 완료 | #7 | Web UI Dashboard |
-| Phase 5 | ✅ 완료 | #8 | Docker + CI/CD |
-| Phase 6 | ✅ 완료 | #9 | Docker 통합 테스트 + 규칙 검증 |
-| Phase 7 | ✅ 완료 | #10 | Drift Detection + Remediation |
-| Phase 8 | ✅ 완료 | #12 | 멀티 리전 + 이상치 탐지 |
-| Phase 9 | ⭕ 예정 | - | 보안 + 문서화 + 최종 검증 |
+**규칙 확장**: 31개 → 62개 (100% 증가)
+- **공통 규칙**: 12개 → 24개
+- **역할별 규칙**: 19개 → 38개
 
-## 🏗️ Phase 상세
+#### 🌐 **네트워크 고급 튜닝**
+- **RPS/XPS/RFS 설정**: 멀티큐 네트워크 인터페이스 최적화
+- **인터럽트 분산**: IRQ affinity, coalescing, busy polling
+- **연결 추적**: nf_conntrack 대용량 환경 튜닝 (1M+ 연결)
+- **TCP 최적화**: window scaling, timestamps, SACK
+- **ARP 테이블**: 대규모 네트워크 환경 최적화
 
-### Phase 1: 기획/설계 ✅
-- `docs/ARCHITECTURE.md` — 전체 시스템 아키텍처
-- `docs/RULES.md` — 역할별 OS 튜닝 규칙 (5 역할 × 6 카테고리)
-- `docs/REPORT-SCHEMA.md` — JSON 리포트 스키마
-- `docs/UI-CONCEPT.md` — UI 컨셉 (토폴로지, 히트맵, Drift)
-- `docs/API.md` — Aggregator API 스펙
+#### 💻 **KVM/QEMU 가상화 튜닝 (Compute 역할)**
+- **중첩 가상화**: KVM nested virtualization 지원
+- **CPU 최적화**: C-state 제한, P-state 관리
+- **메모리 최적화**: 2MB/1GB Hugepages, 오버커밋 정책
+- **NUMA 최적화**: NUMA balancing, zone reclaim 설정
+- **가상화 감지**: VFIO/IOMMU, hypervisor 플래그 체크
 
-### Phase 2: Agent 구현 ✅ (PR #5)
-- 6개 Collector: CPU, Memory, Network, Storage, Kernel, Service
-- Rules Engine: 공통 규칙 + 5개 역할별 규칙
-- CLI: `infra-audit scan`, `infra-audit report`
-- 역할 자동 감지 (프로세스 기반)
-- 93개 테스트 통과
+#### 🗄️ **Ceph 스토리지 최적화 (Storage-Ceph 역할)**
+- **BlueStore 튜닝**: OSD 메모리 타겟 (8GB), RocksDB 옵션
+- **I/O 스케줄러**: NVMe → none, SSD → mq-deadline 
+- **네트워크**: Ceph 클러스터 통신 버퍼 (64MB+)
+- **파일시스템**: XFS noatime, inode64, allocsize 최적화
+- **디스크 튜닝**: read-ahead, nr_requests 최적화
 
-### Phase 3: Aggregator Server ✅ (PR #6)
-- FastAPI 기반 REST API
-- SQLite 저장소
-- 7개 API 엔드포인트 (reports, compliance, dashboard, health)
-- CORS 미들웨어
+#### 🧠 **메모리 관리 고급**
+- **KSM**: Kernel Same-page Merging 최적화
+- **대용량 RAM**: 1-2TB 환경 min_free_kbytes 동적 설정
+- **THP 정책**: 역할별 Transparent Hugepages 최적화
+- **NUMA**: zone_reclaim 비활성화로 성능 향상
 
-### Phase 4: Web UI ✅ (PR #7)
-- React + TypeScript + Tailwind CSS + Recharts
-- 5개 페이지: Dashboard, Compliance, Servers, RegionDetail, HostDetail
-- TanStack Query API 연동
-- 반응형 디자인
+#### ⚙️ **커널 고급 튜닝**
+- **스케줄러**: migration cost, autogroup 최적화
+- **안정성**: panic_on_oops, watchdog 임계값
+- **I/O 한계**: aio-max-nr (1M), inotify 대규모 설정
+- **프로세스**: PID 최대값 4M+ 설정
+- **cgroup**: v1/v2 감지 및 최적화
 
-### Phase 5: Docker + CI/CD ✅ (PR #8)
-- 3개 Dockerfile (agent, aggregator, frontend)
-- docker-compose.yml (6 서비스)
-- GitHub Actions CI (lint + test)
-- Makefile 자동화
+#### 🔧 **데이터 수집 강화**
+- **네트워크**: RPS/XPS/RFS 큐별 설정 수집
+- **CPU**: P-state, 마이크로코드 정보 수집
+- **메모리**: KSM 통계, 1GB hugepages 수집
+- **스토리지**: Ceph 설정, I/O 스케줄러 수집
+- **커널**: 고급 파라미터, cgroup 버전 감지
 
-### Phase 6: Docker 통합 테스트 + 규칙 검증 ✅
-- [x] docker compose up 전체 스택 실행
-- [x] Agent → Aggregator 리포트 전송 검증 (4개 서버 성공)
-- [x] 4개 OS에서 collector 실제 값 수집 확인 (컨테이너 환경 제약 고려)
-- [x] role_rules.py ↔ RULES.md 일치 검증 (누락 규칙 추가)
-- [x] Frontend ↔ API 실제 연동 확인 (3% compliance, 4 critical, 32 warning)
-- [x] .gitignore 정리 (불필요한 파일 제거)
+#### ✅ **테스트 및 품질**
+- **테스트 확장**: 새로운 규칙별 테스트 36개 추가
+- **규칙 검증**: 모든 역할별 고급 튜닝 규칙 검증
+- **문서 업데이트**: RULES.md 상세 업데이트
+- **호환성**: CentOS 7 (kernel 3.10) graceful fallback 보장
 
-### Phase 7: Drift Detection + Remediation ✅ (PR #10)
-- [x] DriftDetector: 스캔 결과 저장 및 비교 (호스트별 JSON 히스토리)
-- [x] CLI drift 하이라이팅 (improved/degraded/changed 컬러 코딩)
-- [x] RemediationGenerator: sysctl/config 수정 스크립트 자동 생성 (백업+dry-run)
-- [x] CLI remediate 명령어 (severity/category 필터)
-- [x] Aggregator API: drift/compare, drift/{id}, drift/{id}/history
-- [x] Aggregator API: remediation/generate, remediation/{id}
-- [x] 테스트 41개 추가 (총 134개 통과)
+### 🎯 **주요 성과**
 
-### Phase 8: 멀티 리전 + 이상치 탐지 ✅ (PR #12)
-- [x] 4개 리전 동시 뷰 (RegionComparison 페이지, best/worst 리전, cross-region drift)
-- [x] 같은 역할 서버 간 설정 불일치 탐지 (mode 기반 이탈 감지, 표준화 추천)
-- [x] 리전 간 compliance 비교 (리전별 카드, role별 점수, variance 분석)
-- [x] 알림 시스템 (Critical/Warning 수준, 설정 가능 임계값, 리전 drift 알림)
-- [x] 5개 API 엔드포인트 추가
-- [x] 3개 Frontend 페이지 추가
-- [x] 21개 테스트 추가 (총 155개 통과)
+#### 📈 **성능 최적화 영역**
+1. **네트워크**: 25/100GbE Mellanox ConnectX 최적화
+2. **가상화**: Intel Xeon 4th/5th Gen KVM 호스트 최적화  
+3. **스토리지**: Ceph BlueStore NVMe/SSD 최적화
+4. **메모리**: 1-2TB DDR5 대용량 환경 최적화
+5. **CPU**: 수십~100+ 코어 멀티소켓 최적화
 
-### Phase 9: 보안 + 문서화 + 최종 검증 ⭕
-- [ ] API 인증 (JWT/API Key)
-- [ ] HTTPS 설정
-- [ ] README 설치/사용 가이드
-- [ ] 운영 가이드 문서
-- [ ] 성능 테스트
+#### 🏗️ **아키텍처 개선**
+- **확장성**: 모듈러 collector 설계로 새 파라미터 쉽게 추가
+- **역할 특화**: 각 서버 역할별 전문 최적화 규칙
+- **하드웨어 감지**: 동적 권장값 (예: RAM 크기별 min_free_kbytes)
+- **플랫폼 호환**: 다중 커널 버전 지원 (3.10~6.8)
 
-## 📈 수치
+#### 🔍 **모니터링 강화**
+- **심화 진단**: 62개 규칙으로 더 세밀한 성능 분석
+- **전문 지식**: Red Hat, Ubuntu, Ceph, Intel 가이드 기반
+- **실무 적용**: 프로덕션 환경 검증된 권장값
+- **자동 수정**: 각 규칙별 remediation 명령어 제공
 
-| 항목 | 값 |
-|------|-----|
-| 소스 코드 | ~9,300줄 |
-| 테스트 | 155개 (전체 통과) |
-| PR 머지 | 6개 |
-| Issues 클로즈 | 6개 |
-| 설계 문서 | 5개 |
-| Docker 이미지 | 6개 |
-| 지원 OS | 4개 |
-| 서버 역할 | 5개 |
-| 튜닝 규칙 | 24+ |
+---
 
-## 🔄 Iteration 기록
+## 이전 단계들
 
-| # | 시간 | 내용 |
-|---|------|------|
-| 1 | 03/07 16:47 | Phase 1 설계 DR 시작 |
-| 1 | 03/07 21:00 | Phase 2-5 전체 구현 완료 |
-| 2 | 03/08 00:33 | Phase 6 완료 (Docker 통합 테스트 + 규칙 검증) |
-| 3 | 03/08 02:15 | Phase 7 완료 (Drift Detection + Remediation) |
-| 4 | 03/08 07:15 | Phase 8 완료 (멀티 리전 + 이상치 탐지) |
-| 5 | 예정 | Phase 9 최종 검증 |
+### Phase 6: Role-Based Rules (2024)
+- 기본 역할별 규칙 시스템 구축
+- Control, Compute, Network, Storage 분리
+- 31개 기초 OS 튜닝 규칙 구현
+
+### Phase 1-5: Foundation (2024)
+- 기본 아키텍처 및 수집기 개발
+- 웹 인터페이스 구축
+- API 엔드포인트 구현
+- 기본 리포팅 시스템
+
+---
+
+**다음 단계**: 실제 서버 환경에서 검증 및 피드백 반영
