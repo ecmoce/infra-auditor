@@ -4,11 +4,11 @@
 
 각 서버 역할(Control, Compute, Network, Storage-Ceph, Storage-S3)별로 최적화해야 할 OS 설정과 권장값을 정의합니다.
 
-## 규칙 통계 (Phase 6.5 Enhanced)
+## 규칙 통계 (Phase 7 Infrastructure Enhanced)
 
-- **전체 규칙 수**: 62개 (기존 31개 → 100% 증가)
-- **공통 규칙**: 24개 (고급 네트워크, 메모리, 커널 튜닝 포함)
-- **역할별 규칙**: 38개 (KVM/QEMU, Ceph, 고급 네트워크 최적화 포함)
+- **전체 규칙 수**: 95개 (기존 62개 → 53% 증가)
+- **공통 규칙**: 33개 (systemd, Docker, inotify 확장 포함)
+- **역할별 규칙**: 62개 (OVS, Network Bonding, Docker, systemd 포함)
 
 ### 새로 추가된 고급 튜닝 영역
 
@@ -17,6 +17,34 @@
 - **인터럽트 분산**: IRQ affinity 및 coalescing 설정
 - **연결 추적**: nf_conntrack 대용량 환경 튜닝
 - **TCP 고급 설정**: window scaling, busy polling
+
+#### OVS (Open vSwitch) 튜닝 (Compute, Network 역할)
+- **OVS-DPDK**: PMD CPU 바인딩, hugepage 할당, socket memory
+- **Flow Tables**: 흐름 캐시 크기, EMC/megaflow 최적화
+- **Handler/Revalidator**: 스레드 수 최적화
+- **OVS Bonding**: balance-tcp, balance-slb, LACP 설정
+- **vhost-user**: VM 연결 소켓 최적화
+
+#### Network Bonding 튜닝 (Network, Storage 역할)
+- **본딩 모드**: 802.3ad LACP, active-backup, balance-xor
+- **LACP 최적화**: fast rate, layer3+4 해싱
+- **장애 감지**: MII monitoring 간격, fail-over 설정
+- **MTU 일치**: bond와 slave 인터페이스 일관성
+- **점보프레임**: 스토리지 네트워크 MTU 9000
+
+#### Docker 컨테이너 튜닝 (Control, Storage-S3 역할)
+- **Storage Driver**: overlay2 권장, aufs/devicemapper 금지
+- **Live Restore**: 데몬 재시작 시 컨테이너 연속성
+- **로그 관리**: 로그 로테이션, 크기 제한
+- **네트워크**: userland-proxy 비활성화, IP forwarding
+- **보안**: bridge-nf-call-iptables 활성화
+
+#### systemd 서비스 관리 (모든 역할)
+- **서비스 상태**: 역할별 핵심 서비스 모니터링
+- **Unit 파일 최적화**: LimitNOFILE, TasksMax, MemoryMax
+- **journald 설정**: persistent storage, 디스크 사용량 제한
+- **시스템 설정**: DefaultLimitNOFILE, 부트 시간 분석
+- **실패 감지**: 실패한 유닛 수 모니터링
 
 #### KVM/QEMU 가상화 튜닝 (Compute 역할)
 - **중첩 가상화**: KVM nested 지원 활성화
@@ -325,3 +353,89 @@
 - 구성 확인
 
 이 규칙들은 지속적으로 업데이트되며, 실제 워크로드 테스트를 통한 검증이 필요합니다.
+
+## 새로 추가된 규칙 카테고리 (Phase 7)
+
+### OVS (Open vSwitch) 관련
+
+#### Compute 역할
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| DPDK 초기화 | `ovs-vsctl get Open_vSwitch . other_config:dpdk-init` | true | VM 네트워크 성능 대폭 향상 |
+| PMD CPU 마스크 | `ovs-vsctl get Open_vSwitch . other_config:pmd-cpu-mask` | configured | DPDK 스레드 전용 CPU 할당 |
+| Hugepages | `/proc/meminfo \| grep HugePages_Total` | ≥1024 | DPDK 메모리 할당 필요 |
+
+#### Network 역할
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| OVS 본딩 설정 | `ovs-vsctl list port \| grep bond_mode` | configured | OVS 레벨 고성능 본딩 |
+
+### Network Bonding 관련
+
+#### Network, Storage 역할
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| 본딩 모드 | `/sys/class/net/bond*/bonding/mode` | 802.3ad | 최대 대역폭 및 장애 복구 |
+| LACP 속도 | `/sys/class/net/bond*/bonding/lacp_rate` | fast | 빠른 장애 감지 |
+| 해시 정책 | `/sys/class/net/bond*/bonding/xmit_hash_policy` | layer3+4 | 균등한 트래픽 분산 |
+
+#### Storage-Ceph 역할
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| 점보프레임 MTU | `/sys/class/net/bond*/mtu` | 9000 | 스토리지 트래픽 오버헤드 감소 |
+
+### Docker 컨테이너 관련
+
+#### Control, Storage-S3 역할
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| 스토리지 드라이버 | `docker info \| grep 'Storage Driver'` | overlay2 | 검증된 성능과 안정성 |
+| Live Restore | `/etc/docker/daemon.json` | true | 데몬 재시작 시 컨테이너 유지 |
+| 로그 로테이션 | `/etc/docker/daemon.json` | configured | 디스크 공간 관리 |
+
+#### 공통 (Docker 사용 시)
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| IP 포워딩 | `/proc/sys/net/ipv4/ip_forward` | 1 | 컨테이너 네트워킹 필수 |
+| iptables 브리지 | `/proc/sys/net/bridge/bridge-nf-call-iptables` | 1 | 네트워크 정책 적용 |
+| inotify 감시 수 | `/proc/sys/fs/inotify/max_user_watches` | ≥1048576 | 다중 컨테이너 지원 |
+
+### systemd 서비스 관리
+
+#### 역할별 핵심 서비스 상태
+- **Control**: etcd, kube-apiserver, kube-scheduler, kube-controller-manager, docker/containerd
+- **Compute**: libvirtd, qemu-kvm, ovs-vswitchd, ovsdb-server, nova-compute  
+- **Network**: haproxy, nginx, keepalived, ovs-vswitchd
+- **Storage-Ceph**: ceph-osd@*, ceph-mon@*, ceph-mgr@*, ceph-mds@*
+- **Storage-S3**: radosgw@*, nginx
+- **공통**: chronyd/ntpd, rsyslog, auditd, firewalld/iptables, irqbalance, tuned
+
+#### 시스템 설정
+| 항목 | 수집 방법 | 권장값 | 근거 |
+|------|-----------|--------|------|
+| 실패한 유닛 수 | `systemctl list-units --failed` | 0 | 시스템 안정성 확보 |
+| journald 스토리지 | `/etc/systemd/journald.conf` | persistent | 로그 영구 보존 |
+| 기본 파일 제한 | `systemctl show --property=DefaultLimitNOFILE` | ≥65536 | 고성능 서비스 지원 |
+
+## 설정 우선순위
+
+### Critical (점수 15-25)
+- OVS-DPDK 비활성화 (Compute)
+- 핵심 서비스 중단 (모든 역할)
+- Docker 스토리지 드라이버 문제
+
+### Warning (점수 8-15) 
+- 네트워크 본딩 모드 최적화
+- Docker Live Restore 비활성화
+- systemd 서비스 상태 이상
+
+### Info (점수 3-8)
+- OVS 기본 설정 확인
+- 로그 로테이션 미설정
+- journald 설정 최적화
+
+## 호환성 노트
+
+- **CentOS 7**: OVS/Docker 명령어 없으면 graceful skip
+- **Ubuntu 22/24**: 모든 기능 지원
+- **Rocky 9**: systemd v2 cgroup 지원

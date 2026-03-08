@@ -13,6 +13,10 @@ from infra_auditor.collectors.memory import MemoryCollector
 from infra_auditor.collectors.network import NetworkCollector
 from infra_auditor.collectors.service import ServiceCollector
 from infra_auditor.collectors.storage import StorageCollector
+from infra_auditor.collectors.ovs import OVSCollector
+from infra_auditor.collectors.bonding import BondingCollector
+from infra_auditor.collectors.docker import DockerCollector
+from infra_auditor.collectors.systemd import SystemdCollector
 from infra_auditor.rules.engine import RulesEngine
 from infra_auditor.utils.role_detector import detect_role
 from infra_auditor.utils.system import get_server_info
@@ -40,6 +44,10 @@ class Report:
             ("storage", StorageCollector()),
             ("kernel", KernelCollector()),
             ("service", ServiceCollector()),
+            ("ovs", OVSCollector()),
+            ("bonding", BondingCollector()),
+            ("docker", DockerCollector()),
+            ("systemd", SystemdCollector()),
         ]
 
         for name, collector in collectors:

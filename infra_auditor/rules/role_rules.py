@@ -50,6 +50,103 @@ def _extract_dirty_ratio(d):
     return d.get("memory", {}).get("dirty_ratio", "unknown")
 
 
+# Helper functions for new collectors
+def _extract_ovs_available(d):
+    return d.get("ovs", {}).get("available", False)
+
+
+def _extract_ovs_dpdk_init(d):
+    return d.get("ovs", {}).get("dpdk_config", {}).get("dpdk_init", "")
+
+
+def _extract_ovs_pmd_cpu_mask(d):
+    return d.get("ovs", {}).get("dpdk_config", {}).get("pmd_cpu_mask", "")
+
+
+def _extract_ovs_socket_mem(d):
+    return d.get("ovs", {}).get("dpdk_config", {}).get("socket_mem", "")
+
+
+def _extract_hugepages_total(d):
+    return d.get("ovs", {}).get("dpdk_config", {}).get("hugepage_info", {}).get("HugePages_Total", "0")
+
+
+def _extract_bond_mode(d):
+    bonds = d.get("bonding", {}).get("bonds", [])
+    if bonds and len(bonds) > 0:
+        mode_parsed = bonds[0].get("mode_parsed", {})
+        return mode_parsed.get("name", "unknown")
+    return "no_bonds"
+
+
+def _extract_bond_lacp_rate(d):
+    bonds = d.get("bonding", {}).get("bonds", [])
+    for bond in bonds:
+        if "802.3ad" in bond.get("mode", ""):
+            return bond.get("lacp_rate", "unknown")
+    return "no_lacp"
+
+
+def _extract_bond_xmit_hash(d):
+    bonds = d.get("bonding", {}).get("bonds", [])
+    for bond in bonds:
+        if "802.3ad" in bond.get("mode", ""):
+            return bond.get("xmit_hash_policy", "unknown")
+    return "no_lacp"
+
+
+def _extract_docker_available(d):
+    return d.get("docker", {}).get("available", False)
+
+
+def _extract_docker_storage_driver(d):
+    info = d.get("docker", {}).get("system_info", {})
+    return info.get("Driver", "unknown")
+
+
+def _extract_docker_live_restore(d):
+    daemon_config = d.get("docker", {}).get("daemon_config", {}).get("daemon_json", {})
+    return str(daemon_config.get("live-restore", False)).lower()
+
+
+def _extract_docker_userland_proxy(d):
+    daemon_config = d.get("docker", {}).get("daemon_config", {}).get("daemon_json", {})
+    return str(daemon_config.get("userland-proxy", True)).lower()
+
+
+def _extract_docker_log_driver(d):
+    daemon_config = d.get("docker", {}).get("daemon_config", {}).get("daemon_json", {})
+    log_driver = daemon_config.get("log-driver", "json-file")
+    return log_driver
+
+
+def _extract_docker_log_max_size(d):
+    daemon_config = d.get("docker", {}).get("daemon_config", {}).get("daemon_json", {})
+    log_opts = daemon_config.get("log-opts", {})
+    return log_opts.get("max-size", "")
+
+
+def _extract_systemd_available(d):
+    return d.get("systemd", {}).get("available", False)
+
+
+def _extract_systemd_failed_count(d):
+    failed_units = d.get("systemd", {}).get("failed_units", [])
+    return len(failed_units)
+
+
+def _extract_service_status(service_name):
+    def extractor(d):
+        services = d.get("systemd", {}).get("services", {})
+        role_services = services.get("role_services", {})
+        for role, service_list in role_services.items():
+            for service in service_list:
+                if service_name in service.get("name", ""):
+                    return service.get("active", "unknown")
+        return "not_found"
+    return extractor
+
+
 def _extract_dirty_background_ratio(d):
     return d.get("memory", {}).get("dirty_background_ratio", "unknown")
 
@@ -196,6 +293,89 @@ CONTROL_RULES = [
         value_extractor=lambda d: d.get("kernel", {}).get("cgroup_version", "v1"),
         roles=["control"],
     ),
+    # OVS Rules for Control
+    Rule(
+        category="ovs",
+        subcategory="config",
+        item="ovs_basic_config",
+        description="OVS 기본 설정 확인",
+        recommended_value="configured",
+        collection_method="ovs-vsctl --version && ovs-vsctl show",
+        severity="info",
+        impact_description="OVS 네트워크 기능 제한",
+        justification="Control 노드의 기본 네트워킹 요구사항",
+        remediation_command="systemctl enable --now openvswitch",
+        remediation_persistent="systemctl enable openvswitch",
+        score_impact=3,
+        value_extractor=lambda d: "configured" if d.get("ovs", {}).get("available", False) else "not_configured",
+        roles=["control"],
+    ),
+    # Docker Rules for Control
+    Rule(
+        category="docker",
+        subcategory="daemon",
+        item="docker_storage_driver",
+        description="Docker 스토리지 드라이버 (overlay2 권장)",
+        recommended_value="overlay2",
+        collection_method="docker info | grep 'Storage Driver'",
+        severity="warning",
+        impact_description="성능 저하 및 안정성 문제",
+        justification="overlay2는 성능과 안정성이 검증된 드라이버",
+        remediation_command="Docker daemon 재설정 필요",
+        remediation_persistent="daemon.json에서 storage-driver 설정",
+        score_impact=7,
+        value_extractor=_extract_docker_storage_driver,
+        roles=["control"],
+    ),
+    Rule(
+        category="docker",
+        subcategory="daemon",
+        item="docker_live_restore",
+        description="Docker Live Restore 활성화",
+        recommended_value="true",
+        collection_method="cat /etc/docker/daemon.json",
+        severity="warning",
+        impact_description="Docker daemon 재시작 시 컨테이너 중단",
+        justification="운영 중 Docker 업데이트 시 서비스 연속성 보장",
+        remediation_command='echo \'{"live-restore": true}\' > /etc/docker/daemon.json',
+        remediation_persistent="daemon.json 설정",
+        score_impact=8,
+        value_extractor=_extract_docker_live_restore,
+        roles=["control"],
+    ),
+    # systemd Rules for Control
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="etcd_service_status",
+        description="etcd 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active etcd",
+        severity="critical",
+        impact_description="클러스터 메타데이터 저장소 중단",
+        justification="Kubernetes 클러스터 핵심 구성요소",
+        remediation_command="systemctl start etcd",
+        remediation_persistent="systemctl enable etcd",
+        score_impact=10,
+        value_extractor=_extract_service_status("etcd"),
+        roles=["control"],
+    ),
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="docker_service_status",
+        description="Docker 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active docker",
+        severity="critical",
+        impact_description="컨테이너 런타임 중단",
+        justification="Control plane 컨테이너 실행에 필수",
+        remediation_command="systemctl start docker",
+        remediation_persistent="systemctl enable docker",
+        score_impact=10,
+        value_extractor=_extract_service_status("docker"),
+        roles=["control"],
+    ),
 ]
 
 # ── Compute (VM) ──
@@ -300,6 +480,89 @@ COMPUTE_RULES = [
         remediation_persistent="echo 'vm.overcommit_memory = 1' >> /etc/sysctl.conf",
         score_impact=4,
         value_extractor=lambda d: d.get("memory", {}).get("overcommit_memory", "0"),
+        roles=["compute"],
+    ),
+    # OVS-DPDK Rules for Compute
+    Rule(
+        category="ovs",
+        subcategory="dpdk",
+        item="ovs_dpdk_enabled",
+        description="OVS-DPDK 활성화 상태",
+        recommended_value="true",
+        collection_method="ovs-vsctl get Open_vSwitch . other_config:dpdk-init",
+        severity="critical",
+        impact_description="VM 네트워크 성능 대폭 저하",
+        justification="고성능 VM 네트워크를 위한 DPDK 가속화 필수",
+        remediation_command="ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true",
+        remediation_persistent="OVS 서비스 재시작 필요",
+        score_impact=25,
+        value_extractor=_extract_ovs_dpdk_init,
+        roles=["compute"],
+    ),
+    Rule(
+        category="ovs",
+        subcategory="dpdk",
+        item="pmd_cpu_mask",
+        description="PMD CPU 마스크 설정",
+        recommended_value="configured",
+        collection_method="ovs-vsctl get Open_vSwitch . other_config:pmd-cpu-mask",
+        severity="warning",
+        impact_description="PMD 스레드 CPU 바인딩 미설정",
+        justification="DPDK PMD 스레드를 전용 CPU 코어에 바인딩",
+        remediation_command="ovs-vsctl set Open_vSwitch . other_config:pmd-cpu-mask=0x6",
+        remediation_persistent="VM과 PMD용 CPU 분리 설정",
+        score_impact=15,
+        value_extractor=lambda d: "configured" if _extract_ovs_pmd_cpu_mask(d) else "not_configured",
+        roles=["compute"],
+    ),
+    Rule(
+        category="ovs",
+        subcategory="dpdk",
+        item="hugepages_allocated",
+        description="Hugepages 할당 상태",
+        recommended_value="1024",
+        collection_method="cat /proc/meminfo | grep HugePages_Total",
+        severity="critical",
+        impact_description="DPDK 메모리 할당 실패",
+        justification="DPDK 고성능 메모리 액세스를 위한 hugepage",
+        remediation_command="echo 1024 > /proc/sys/vm/nr_hugepages",
+        remediation_persistent="GRUB에 hugepages=1024 추가",
+        score_impact=20,
+        value_extractor=_extract_hugepages_total,
+        comparator=_gte_comparator,
+        roles=["compute"],
+    ),
+    # systemd Rules for Compute
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="libvirtd_service_status",
+        description="libvirtd 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active libvirtd",
+        severity="critical",
+        impact_description="가상머신 관리 기능 중단",
+        justification="KVM/QEMU 가상머신 관리에 필수",
+        remediation_command="systemctl start libvirtd",
+        remediation_persistent="systemctl enable libvirtd",
+        score_impact=10,
+        value_extractor=_extract_service_status("libvirtd"),
+        roles=["compute"],
+    ),
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="ovs_vswitchd_service_status",
+        description="ovs-vswitchd 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active ovs-vswitchd",
+        severity="critical",
+        impact_description="VM 네트워킹 완전 중단",
+        justification="VM 네트워크 연결에 필수",
+        remediation_command="systemctl start ovs-vswitchd",
+        remediation_persistent="systemctl enable ovs-vswitchd",
+        score_impact=10,
+        value_extractor=_extract_service_status("ovs-vswitchd"),
         roles=["compute"],
     ),
 ]
@@ -423,6 +686,89 @@ NETWORK_RULES = [
         remediation_persistent="네트워크 스크립트에 영구 설정 추가",
         score_impact=5,
         value_extractor=lambda d: "on" if any("on" in str(iface.get("offload", {}).get("features", "")).lower() for iface in d.get("network", {}).get("advanced_tuning", {}).values()) else "off",
+        roles=["network"],
+    ),
+    # OVS Bonding Rules for Network
+    Rule(
+        category="bonding",
+        subcategory="mode",
+        item="bond_mode_lacp",
+        description="본딩 모드 (LACP/802.3ad 권장)",
+        recommended_value="802.3ad",
+        collection_method="cat /sys/class/net/bond*/bonding/mode",
+        severity="warning",
+        impact_description="네트워크 대역폭 및 장애 복구 능력 제한",
+        justification="최대 대역폭과 링크 장애 복구를 위한 LACP",
+        remediation_command="echo 802.3ad > /sys/class/net/bond0/bonding/mode",
+        remediation_persistent="bonding 설정에서 mode=802.3ad",
+        score_impact=15,
+        value_extractor=_extract_bond_mode,
+        roles=["network"],
+    ),
+    Rule(
+        category="bonding",
+        subcategory="lacp",
+        item="lacp_rate",
+        description="LACP 속도 설정 (fast 권장)",
+        recommended_value="fast",
+        collection_method="cat /sys/class/net/bond*/bonding/lacp_rate",
+        severity="info",
+        impact_description="링크 장애 감지 지연",
+        justification="빠른 장애 감지로 네트워크 복구 시간 단축",
+        remediation_command="echo fast > /sys/class/net/bond0/bonding/lacp_rate",
+        remediation_persistent="bonding 설정에서 lacp_rate=fast",
+        score_impact=8,
+        value_extractor=_extract_bond_lacp_rate,
+        roles=["network"],
+    ),
+    Rule(
+        category="bonding",
+        subcategory="hash",
+        item="xmit_hash_policy",
+        description="전송 해시 정책 (layer3+4 권장)",
+        recommended_value="layer3+4",
+        collection_method="cat /sys/class/net/bond*/bonding/xmit_hash_policy",
+        severity="warning",
+        impact_description="트래픽 분산 불균형",
+        justification="IP+Port 기반 해싱으로 균등한 부하 분산",
+        remediation_command="echo layer3+4 > /sys/class/net/bond0/bonding/xmit_hash_policy",
+        remediation_persistent="bonding 설정에서 xmit_hash_policy=layer3+4",
+        score_impact=12,
+        value_extractor=_extract_bond_xmit_hash,
+        roles=["network"],
+    ),
+    # OVS Rules for Network
+    Rule(
+        category="ovs",
+        subcategory="bonding",
+        item="ovs_bond_configuration",
+        description="OVS 본딩 설정",
+        recommended_value="configured",
+        collection_method="ovs-vsctl list port | grep bond_mode",
+        severity="warning",
+        impact_description="OVS 레벨 본딩 미설정",
+        justification="OVS 레벨에서 고성능 본딩 제공",
+        remediation_command="ovs-vsctl add-bond br0 bond0 eth0 eth1 bond_mode=balance-tcp",
+        remediation_persistent="OVS 본딩 설정 영구화",
+        score_impact=10,
+        value_extractor=lambda d: "configured" if d.get("ovs", {}).get("bonding", []) else "not_configured",
+        roles=["network"],
+    ),
+    # systemd Rules for Network
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="haproxy_service_status",
+        description="HAProxy 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active haproxy",
+        severity="critical",
+        impact_description="로드밸런싱 서비스 중단",
+        justification="ELB 핵심 구성요소",
+        remediation_command="systemctl start haproxy",
+        remediation_persistent="systemctl enable haproxy",
+        score_impact=10,
+        value_extractor=_extract_service_status("haproxy"),
         roles=["network"],
     ),
 ]
@@ -564,6 +910,73 @@ STORAGE_CEPH_RULES = [
         score_impact=10,
         value_extractor=lambda d: d.get("network", {}).get("sysctl", {}).get("net.core.rmem_max", "212992"),
         comparator=_gte_comparator,
+        roles=["storage-ceph"],
+    ),
+    # Bonding Rules for Storage-Ceph
+    Rule(
+        category="bonding",
+        subcategory="mode",
+        item="bond_mode_lacp",
+        description="본딩 모드 (LACP/802.3ad 권장)",
+        recommended_value="802.3ad",
+        collection_method="cat /sys/class/net/bond*/bonding/mode",
+        severity="warning",
+        impact_description="스토리지 네트워크 대역폭 제한",
+        justification="Ceph 클러스터/퍼블릭 네트워크 성능 최적화",
+        remediation_command="echo 802.3ad > /sys/class/net/bond0/bonding/mode",
+        remediation_persistent="bonding 설정에서 mode=802.3ad",
+        score_impact=15,
+        value_extractor=_extract_bond_mode,
+        roles=["storage-ceph"],
+    ),
+    Rule(
+        category="bonding",
+        subcategory="mtu",
+        item="bond_jumbo_frames",
+        description="본딩 인터페이스 점보 프레임 (MTU 9000)",
+        recommended_value="9000",
+        collection_method="cat /sys/class/net/bond*/mtu",
+        severity="warning",
+        impact_description="스토리지 네트워크 처리량 저하",
+        justification="대용량 데이터 전송 시 오버헤드 감소",
+        remediation_command="ip link set bond0 mtu 9000",
+        remediation_persistent="네트워크 설정에서 MTU=9000",
+        score_impact=12,
+        value_extractor=lambda d: str(d.get("bonding", {}).get("bonds", [{}])[0].get("mtu", 1500)),
+        comparator=_gte_comparator,
+        roles=["storage-ceph"],
+    ),
+    # systemd Rules for Storage-Ceph
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="ceph_osd_services_status",
+        description="Ceph OSD 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active ceph-osd@*.service",
+        severity="critical",
+        impact_description="스토리지 데이터 접근 불가",
+        justification="Ceph 클러스터 데이터 저장 핵심 구성요소",
+        remediation_command="systemctl start ceph-osd@*.service",
+        remediation_persistent="systemctl enable ceph-osd@*.service",
+        score_impact=10,
+        value_extractor=_extract_service_status("ceph-osd"),
+        roles=["storage-ceph"],
+    ),
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="ceph_mon_services_status",
+        description="Ceph Monitor 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active ceph-mon@*.service",
+        severity="critical",
+        impact_description="Ceph 클러스터 메타데이터 관리 중단",
+        justification="클러스터 상태 모니터링 필수 구성요소",
+        remediation_command="systemctl start ceph-mon@*.service",
+        remediation_persistent="systemctl enable ceph-mon@*.service",
+        score_impact=10,
+        value_extractor=_extract_service_status("ceph-mon"),
         roles=["storage-ceph"],
     ),
 ]
@@ -721,6 +1134,89 @@ STORAGE_S3_RULES = [
         score_impact=3,
         value_extractor=lambda d: d.get("network", {}).get("sysctl", {}).get("net.ipv4.tcp_keepalive_time", "7200"),
         comparator=_lte_comparator,
+        roles=["storage-s3"],
+    ),
+    # Bonding Rules for Storage-S3
+    Rule(
+        category="bonding",
+        subcategory="mode",
+        item="bond_mode_lacp",
+        description="본딩 모드 (LACP/802.3ad 권장)",
+        recommended_value="802.3ad",
+        collection_method="cat /sys/class/net/bond*/bonding/mode",
+        severity="warning",
+        impact_description="S3 스토리지 네트워크 대역폭 제한",
+        justification="오브젝트 스토리지 고성능 네트워크 연결",
+        remediation_command="echo 802.3ad > /sys/class/net/bond0/bonding/mode",
+        remediation_persistent="bonding 설정에서 mode=802.3ad",
+        score_impact=12,
+        value_extractor=_extract_bond_mode,
+        roles=["storage-s3"],
+    ),
+    # Docker Rules for Storage-S3
+    Rule(
+        category="docker",
+        subcategory="daemon",
+        item="docker_storage_driver",
+        description="Docker 스토리지 드라이버 (overlay2 권장)",
+        recommended_value="overlay2",
+        collection_method="docker info | grep 'Storage Driver'",
+        severity="warning",
+        impact_description="S3 서비스 컨테이너 성능 저하",
+        justification="overlay2는 안정성과 성능이 검증된 드라이버",
+        remediation_command="Docker daemon 재설정 필요",
+        remediation_persistent="daemon.json에서 storage-driver 설정",
+        score_impact=8,
+        value_extractor=_extract_docker_storage_driver,
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="docker",
+        subcategory="logging",
+        item="docker_log_rotation",
+        description="Docker 로그 로테이션 설정",
+        recommended_value="configured",
+        collection_method="cat /etc/docker/daemon.json | grep log-opts",
+        severity="warning",
+        impact_description="무제한 로그 증가로 디스크 공간 부족",
+        justification="S3 서비스 로그 관리로 안정성 확보",
+        remediation_command='echo \'{"log-opts": {"max-size": "10m", "max-file": "3"}}\' > /etc/docker/daemon.json',
+        remediation_persistent="daemon.json 설정",
+        score_impact=6,
+        value_extractor=lambda d: "configured" if _extract_docker_log_max_size(d) else "not_configured",
+        roles=["storage-s3"],
+    ),
+    # systemd Rules for Storage-S3
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="radosgw_service_status",
+        description="RADOS Gateway 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active radosgw@*.service",
+        severity="critical",
+        impact_description="S3 API 서비스 중단",
+        justification="오브젝트 스토리지 API 엔드포인트",
+        remediation_command="systemctl start radosgw@*.service",
+        remediation_persistent="systemctl enable radosgw@*.service",
+        score_impact=10,
+        value_extractor=_extract_service_status("radosgw"),
+        roles=["storage-s3"],
+    ),
+    Rule(
+        category="systemd",
+        subcategory="services",
+        item="nginx_service_status",
+        description="Nginx 서비스 상태",
+        recommended_value="active",
+        collection_method="systemctl is-active nginx",
+        severity="critical",
+        impact_description="S3 프록시/로드밸런서 중단",
+        justification="S3 서비스 프론트엔드 프록시",
+        remediation_command="systemctl start nginx",
+        remediation_persistent="systemctl enable nginx",
+        score_impact=10,
+        value_extractor=_extract_service_status("nginx"),
         roles=["storage-s3"],
     ),
 ]
