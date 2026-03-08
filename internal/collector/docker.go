@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os/exec"
+	"strings"
 
 	"github.com/ecmoce/infra-auditor/pkg/types"
 )
@@ -72,7 +73,7 @@ func (d *DockerCollector) collectContainers() (json.RawMessage, error) {
 		return nil, err
 	}
 	
-	return json.RawMessage(output), nil
+	return d.parseDockerJsonLines(string(output))
 }
 
 // collectImages는 Docker 이미지 정보를 수집합니다.
@@ -83,7 +84,7 @@ func (d *DockerCollector) collectImages() (json.RawMessage, error) {
 		return nil, err
 	}
 	
-	return json.RawMessage(output), nil
+	return d.parseDockerJsonLines(string(output))
 }
 
 // collectInfo는 Docker 시스템 정보를 수집합니다.
@@ -94,5 +95,31 @@ func (d *DockerCollector) collectInfo() (json.RawMessage, error) {
 		return nil, err
 	}
 	
+	// docker info는 단일 JSON 객체를 반환하므로 그대로 사용
 	return json.RawMessage(output), nil
+}
+
+// parseDockerJsonLines는 Docker 명령어의 여러 줄 JSON 출력을 JSON 배열로 변환합니다.
+func (d *DockerCollector) parseDockerJsonLines(output string) (json.RawMessage, error) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var jsonObjects []json.RawMessage
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		
+		// 각 줄이 유효한 JSON인지 확인
+		var temp interface{}
+		if err := json.Unmarshal([]byte(line), &temp); err != nil {
+			slog.Debug("Invalid JSON line skipped", "line", line, "error", err)
+			continue
+		}
+		
+		jsonObjects = append(jsonObjects, json.RawMessage(line))
+	}
+	
+	// JSON 배열로 마샬링
+	return json.Marshal(jsonObjects)
 }

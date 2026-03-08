@@ -26,6 +26,9 @@ func NewAPIHandler(store *Store) *APIHandler {
 
 // RegisterRoutes는 API 라우트를 등록합니다.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	// 기본 라우트
+	mux.HandleFunc("/api/health", h.corsMiddleware(h.handleHealth))
+	
 	// API v1 라우트
 	mux.HandleFunc("/api/v1/reports", h.corsMiddleware(h.handleReports))
 	mux.HandleFunc("/api/v1/reports/", h.corsMiddleware(h.handleReportByID))
@@ -330,4 +333,36 @@ func (h *APIHandler) performSimpleDrift(previous, current *types.Report) map[str
 		},
 		"analysis_time": time.Now(),
 	}
+}
+// handleHealth는 서비스 건강 상태를 반환합니다.
+func (h *APIHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 스토어 상태 확인
+	var dbStatus string
+	if err := h.store.Ping(); err != nil {
+		dbStatus = "error"
+		slog.Warn("Health check - database error", "error", err)
+	} else {
+		dbStatus = "ok"
+	}
+
+	health := map[string]interface{}{
+		"status":    "ok",
+		"timestamp": time.Now(),
+		"version":   "2.0.0-go",
+		"uptime":    time.Since(time.Now().Add(-time.Hour)).String(), // 임시값
+		"database":  dbStatus,
+		"services": map[string]string{
+			"api":    "running",
+			"store":  dbStatus,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(health)
 }

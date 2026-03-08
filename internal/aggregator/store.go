@@ -314,3 +314,21 @@ func (s *Store) Cleanup(retentionDays int) error {
 
 	return nil
 }
+// Ping은 스토어의 상태를 확인합니다.
+func (s *Store) Ping() error {
+	// 데이터 디렉터리 접근 가능한지 확인
+	if _, err := os.Stat(s.dataDir); err != nil {
+		return fmt.Errorf("data directory not accessible: %w", err)
+	}
+	
+	// 쓰기 권한 확인
+	testFile := filepath.Join(s.dataDir, ".health_check")
+	if err := os.WriteFile(testFile, []byte("ok"), 0644); err != nil {
+		return fmt.Errorf("write permission check failed: %w", err)
+	}
+	
+	// 테스트 파일 삭제
+	os.Remove(testFile)
+	
+	return nil
+}
