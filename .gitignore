@@ -13,3 +13,5 @@ frontend/dist/
 *.db
 .env
 .DS_Store
+infra-auditor
+infra-auditor-linux-*
