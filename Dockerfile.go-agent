@@ -1,0 +1,28 @@
+# Multi-stage: Build Go binary and create minimal runtime image
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o infra-auditor ./cmd/infra-auditor/
+
+# Use a minimal base image with shell for easier debugging
+FROM alpine:3.19
+
+# Install basic tools
+RUN apk add --no-cache ca-certificates curl
+
+# Copy the statically linked binary
+COPY --from=builder /app/infra-auditor /usr/local/bin/infra-auditor
+
+# Ensure binary is executable
+RUN chmod +x /usr/local/bin/infra-auditor
+
+WORKDIR /opt/infra-auditor
+
+# Create directory for reports
+RUN mkdir -p /tmp/reports
+
+ENTRYPOINT ["infra-auditor"]
