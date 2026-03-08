@@ -1,0 +1,147 @@
+# {{ ansible_managed }}
+# infra-auditor-aggregator 설정 파일
+
+# 서버 설정
+server:
+  host: {{ aggregator_bind_address }}
+  port: {{ aggregator_port }}
+  max_connections: {{ max_connections }}
+  request_timeout: {{ request_timeout }}s
+
+# 데이터베이스 설정
+database:
+  type: {{ db_type }}
+{% if db_type == 'sqlite' %}
+  file: {{ db_file }}
+{% elif db_type == 'mysql' %}
+  host: {{ db_host | default('localhost') }}
+  port: {{ db_port | default(3306) }}
+  username: {{ db_username }}
+  password: {{ db_password }}
+  database: {{ db_name }}
+{% elif db_type == 'postgresql' %}
+  host: {{ db_host | default('localhost') }}
+  port: {{ db_port | default(5432) }}
+  username: {{ db_username }}
+  password: {{ db_password }}
+  database: {{ db_name }}
+  sslmode: {{ db_sslmode | default('prefer') }}
+{% endif %}
+
+# 로깅 설정
+logging:
+  level: {{ log_level }}
+  file: {{ aggregator_log_path }}/aggregator.log
+  rotation:
+    max_size: {{ log_rotation_size }}
+    max_files: {{ log_retention_days }}
+
+# Agent 연결 설정
+agents:
+  # Agent 등록 자동 승인 여부
+  auto_approve: false
+  
+  # Agent 연결 타임아웃
+  connection_timeout: 30s
+  
+  # Agent 하트비트 간격
+  heartbeat_interval: 60s
+  
+  # Agent 비활성 임계값
+  inactive_threshold: 300s
+
+# 데이터 수집 설정
+collection:
+  # 데이터 수집 간격 (분)
+  interval: {{ collection_interval | default(15) }}
+  
+  # 배치 크기
+  batch_size: {{ collection_batch_size | default(1000) }}
+  
+  # 데이터 보존 기간 (일)
+  retention_days: {{ data_retention_days | default(90) }}
+
+# 알림 설정
+notifications:
+  enabled: {{ notifications_enabled | default(false) }}
+{% if notifications_enabled | default(false) %}
+  
+  # Slack 설정
+  slack:
+    enabled: {{ slack_enabled | default(false) }}
+{% if slack_enabled | default(false) %}
+    webhook_url: {{ slack_webhook_url }}
+    channel: {{ slack_channel | default('#infra-alerts') }}
+    username: {{ slack_username | default('infra-auditor') }}
+{% endif %}
+  
+  # 이메일 설정
+  email:
+    enabled: {{ email_enabled | default(false) }}
+{% if email_enabled | default(false) %}
+    smtp:
+      host: {{ smtp_host }}
+      port: {{ smtp_port | default(587) }}
+      username: {{ smtp_username }}
+      password: {{ smtp_password }}
+      tls: {{ smtp_tls | default(true) }}
+    from: {{ email_from }}
+    to:
+{% for recipient in email_recipients %}
+      - {{ recipient }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+# 보안 설정
+security:
+  # API 토큰 기반 인증
+  api_tokens:
+    enabled: {{ api_tokens_enabled | default(true) }}
+{% if api_tokens_enabled | default(true) %}
+    tokens:
+{% for token in api_tokens | default([]) %}
+      - name: {{ token.name }}
+        token: {{ token.value }}
+        permissions: {{ token.permissions | default(['read']) | join(',') }}
+{% endfor %}
+{% endif %}
+  
+  # TLS 설정
+  tls:
+    enabled: {{ enable_ssl }}
+{% if enable_ssl %}
+    cert_file: {{ ssl_cert_path }}
+    key_file: {{ ssl_key_path }}
+{% endif %}
+
+# 메트릭 설정
+metrics:
+  enabled: {{ metrics_enabled | default(true) }}
+  endpoint: {{ metrics_endpoint | default('/metrics') }}
+  
+  # Prometheus 호환 메트릭 노출
+  prometheus:
+    enabled: {{ prometheus_enabled | default(true) }}
+
+# 대시보드 설정
+dashboard:
+  enabled: {{ dashboard_enabled | default(true) }}
+  path: {{ dashboard_path | default('/') }}
+  
+  # 정적 파일 경로
+  static_path: {{ dashboard_static_path | default('/var/lib/infra-auditor/static') }}
+
+# 성능 튜닝
+performance:
+  # 워커 프로세스 수 (0 = CPU 코어 수)
+  workers: {{ worker_count | default(0) }}
+  
+  # 메모리 사용량 제한 (MB)
+  memory_limit: {{ memory_limit | default(1024) }}
+  
+  # 캐시 설정
+  cache:
+    enabled: {{ cache_enabled | default(true) }}
+    size: {{ cache_size | default(100) }}MB
+    ttl: {{ cache_ttl | default(3600) }}s

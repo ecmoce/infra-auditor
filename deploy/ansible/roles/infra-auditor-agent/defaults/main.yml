@@ -1,0 +1,52 @@
+---
+# infra-auditor-agent 기본 설정
+
+# 바이너리 설정
+binary_name: infra-auditor
+binary_path: /usr/local/bin/{{ binary_name }}
+backup_path: /usr/local/bin/{{ binary_name }}.backup
+
+# Aggregator 설정
+aggregator_url: "{{ hostvars[inventory_hostname]['aggregator_url'] | default('https://aggregator.infra.company.com') }}"
+aggregator_timeout: 30
+
+# 스캔 설정
+scan_schedule: "0 2 * * *"  # 매일 새벽 2시
+scan_timeout: 300
+scan_log_path: /var/log/infra-auditor-scan.log
+
+# 시스템 설정
+create_user: false
+service_user: root
+service_group: root
+
+# 백업 설정
+backup_count: 5
+
+# 아키텍처 매핑
+arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: arm
+  
+# OS별 패키지 매니저
+os_package_manager:
+  CentOS: yum
+  RedHat: yum
+  Rocky: dnf
+  Ubuntu: apt
+  Debian: apt
+
+# 필요 패키지
+required_packages:
+  - curl
+  - wget
+  - cron
+
+# 다운로드 설정
+download_timeout: 60
+github_release_base_url: "https://github.com/ecmoce/infra-auditor/releases/latest/download"
+
+# 로그 설정
+log_rotation_size: "10M"
+log_retention_days: 30

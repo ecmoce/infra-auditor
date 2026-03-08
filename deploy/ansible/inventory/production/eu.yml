@@ -1,0 +1,53 @@
+---
+# 유럽 리전 인벤토리
+all:
+  children:
+    control:
+      hosts:
+        ctrl-eu-01:
+          ansible_host: "{{ ctrl_eu_01_ip | default('10.2.1.10') }}"
+          role: control
+        ctrl-eu-02:
+          ansible_host: "{{ ctrl_eu_02_ip | default('10.2.1.11') }}"
+          role: control
+      vars:
+        region: europe
+        
+    compute:
+      hosts:
+        cmp-eu-[01:50]:
+          ansible_host: "10.2.2.{{ item }}"
+          role: compute
+      vars:
+        region: europe
+        
+    network:
+      hosts:
+        net-eu-[01:10]:
+          ansible_host: "10.2.3.{{ item }}"
+          role: network
+      vars:
+        region: europe
+        
+    storage_ceph:
+      hosts:
+        sto-eu-[01:30]:
+          ansible_host: "10.2.4.{{ item }}"
+          role: storage-ceph
+      vars:
+        region: europe
+        
+    storage_s3:
+      hosts:
+        s3-eu-[01:10]:
+          ansible_host: "10.2.5.{{ item }}"
+          role: storage-s3
+      vars:
+        region: europe
+        
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: "{{ eu_ssh_key | default('~/.ssh/eu-servers') }}"
+    aggregator_url: "{{ eu_aggregator_url | default('https://aggregator-eu.infra.company.com') }}"
+    region_code: eu
+    timezone: Europe/London

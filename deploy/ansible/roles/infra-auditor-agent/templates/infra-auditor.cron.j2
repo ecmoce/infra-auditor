@@ -1,0 +1,9 @@
+# infra-auditor 자동 스캔 (Ansible 자동 생성)
+# 매일 새벽 2시에 인프라 스캔 실행
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# 스캔 스케줄: {{ scan_schedule }}
+{{ scan_schedule }} {{ service_user }} /usr/local/bin/infra-auditor-scan.sh > /dev/null 2>&1

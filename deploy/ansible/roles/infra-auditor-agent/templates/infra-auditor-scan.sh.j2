@@ -1,0 +1,72 @@
+#!/bin/bash
+# infra-auditor 스캔 스크립트 (Ansible 자동 생성)
+
+set -euo pipefail
+
+# 설정
+BINARY="{{ binary_path }}"
+AGGREGATOR_URL="{{ aggregator_url }}"
+SERVER_ROLE="{{ server_role | default('auto') }}"
+TIMEOUT="{{ scan_timeout }}"
+LOG_FILE="{{ scan_log_path }}"
+HOSTNAME="{{ inventory_hostname }}"
+REGION="{{ region_code | default('unknown') }}"
+
+# 로그 함수
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+# 스캔 실행
+run_scan() {
+    log "infra-auditor 스캔 시작 - 호스트: $HOSTNAME, 역할: $SERVER_ROLE, 리전: $REGION"
+    
+    # 스캔 실행 (타임아웃 포함)
+    timeout $TIMEOUT "$BINARY" scan \
+        --role="$SERVER_ROLE" \
+        --aggregator-url="$AGGREGATOR_URL" \
+        --hostname="$HOSTNAME" \
+        --region="$REGION" \
+        --output=json \
+        2>&1 | tee -a "$LOG_FILE"
+    
+    local exit_code=${PIPESTATUS[0]}
+    
+    if [ $exit_code -eq 0 ]; then
+        log "스캔 완료 성공"
+    elif [ $exit_code -eq 124 ]; then
+        log "스캔 타임아웃 (${TIMEOUT}초 초과)"
+        exit 1
+    else
+        log "스캔 실패 (종료 코드: $exit_code)"
+        exit $exit_code
+    fi
+}
+
+# 메인 실행
+main() {
+    # 바이너리 존재 확인
+    if [ ! -x "$BINARY" ]; then
+        log "오류: $BINARY 실행 파일을 찾을 수 없습니다"
+        exit 1
+    fi
+    
+    # Aggregator URL 연결성 확인
+    if ! curl -s --connect-timeout 10 "$AGGREGATOR_URL/health" >/dev/null; then
+        log "경고: Aggregator ($AGGREGATOR_URL) 연결 실패, 로컬 저장됨"
+    fi
+    
+    # 스캔 실행
+    run_scan
+}
+
+# 시그널 핸들러
+cleanup() {
+    log "스캔 중단됨 (시그널 수신)"
+    exit 130
+}
+
+trap cleanup SIGINT SIGTERM
+
+# 스크립트 실행
+main "$@"

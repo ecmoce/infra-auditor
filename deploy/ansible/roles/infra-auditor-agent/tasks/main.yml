@@ -1,0 +1,106 @@
+---
+# infra-auditor-agent 배포 태스크
+
+- name: 아키텍처 감지
+  set_fact:
+    system_arch: "{{ arch_map[ansible_architecture] | default('amd64') }}"
+
+- name: OS 패밀리 감지
+  set_fact:
+    os_family: "{{ ansible_os_family }}"
+
+- name: 필요 패키지 설치 (Red Hat 계열)
+  yum:
+    name: "{{ required_packages }}"
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: 필요 패키지 설치 (Debian 계열)
+  apt:
+    name: "{{ required_packages }}"
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: 기존 바이너리 백업
+  copy:
+    src: "{{ binary_path }}"
+    dest: "{{ backup_path }}.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+    backup: no
+  ignore_errors: yes
+
+- name: 바이너리 다운로드 URL 설정
+  set_fact:
+    binary_url: "{{ github_release_base_url }}/{{ binary_name }}-linux-{{ system_arch }}"
+
+- name: infra-auditor 바이너리 다운로드
+  get_url:
+    url: "{{ binary_url }}"
+    dest: "{{ binary_path }}"
+    mode: '0755'
+    owner: "{{ service_user }}"
+    group: "{{ service_group }}"
+    timeout: "{{ download_timeout }}"
+  notify: restart infra-auditor-scan
+
+- name: 바이너리 실행 가능 확인
+  command: "{{ binary_path }} --version"
+  register: version_check
+  failed_when: version_check.rc != 0
+  changed_when: false
+
+- name: 서버 역할 감지 (그룹 기반)
+  set_fact:
+    server_role: "{{ group_names | select('match', '^(control|compute|network|storage_ceph|storage_s3)$') | list | first | default('unknown') }}"
+
+- name: 스캔 스크립트 생성
+  template:
+    src: infra-auditor-scan.sh.j2
+    dest: /usr/local/bin/infra-auditor-scan.sh
+    mode: '0755'
+    owner: "{{ service_user }}"
+    group: "{{ service_group }}"
+
+- name: Cron 작업 생성
+  template:
+    src: infra-auditor.cron.j2
+    dest: /etc/cron.d/infra-auditor
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart crond
+
+- name: 로그 디렉토리 생성
+  file:
+    path: "{{ scan_log_path | dirname }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_group }}"
+    mode: '0755'
+
+- name: 로그 로테이션 설정
+  blockinfile:
+    path: /etc/logrotate.d/infra-auditor
+    create: yes
+    block: |
+      {{ scan_log_path }} {
+          size {{ log_rotation_size }}
+          rotate {{ log_retention_days }}
+          compress
+          delaycompress
+          missingok
+          notifempty
+          sharedscripts
+      }
+
+- name: 오래된 백업 정리 ({{ backup_count }}개 유지)
+  shell: |
+    ls -1t {{ backup_path }}.* 2>/dev/null | tail -n +{{ backup_count + 1 }} | xargs -r rm -f
+  ignore_errors: yes
+
+- name: 초기 스캔 실행 (선택적)
+  command: /usr/local/bin/infra-auditor-scan.sh
+  when: run_initial_scan | default(false) | bool
+  async: 300
+  poll: 0

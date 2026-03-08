@@ -115,6 +115,82 @@ push: commit-build
 	@echo "📤 Pushing to remote..."
 	git push origin HEAD
 
+# ── Deployment ──────────────────────────────────
+deploy-single:
+	@echo "🚀 Deploying to single server via SCP..."
+	@if [ -z "$(HOST)" ]; then \
+		echo "❌ HOST variable required. Usage: make deploy-single HOST=server.example.com"; \
+		exit 1; \
+	fi
+	@if [ ! -f $(BINARY_NAME)-linux-amd64 ]; then \
+		echo "Building Linux binary..."; \
+		make build-linux; \
+	fi
+	@echo "Uploading binary to $(HOST)..."
+	scp $(BINARY_NAME)-linux-amd64 $(HOST):/tmp/$(BINARY_NAME)
+	ssh $(HOST) "sudo mv /tmp/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME) && sudo chmod +x /usr/local/bin/$(BINARY_NAME)"
+	ssh $(HOST) "/usr/local/bin/$(BINARY_NAME) --version"
+	@echo "✅ Deployment to $(HOST) complete!"
+
+deploy-ansible:
+	@echo "🤖 Deploying via Ansible..."
+	@if [ ! -d "deploy/ansible" ]; then \
+		echo "❌ Ansible deployment files not found"; \
+		exit 1; \
+	fi
+	cd deploy/ansible && ansible-playbook -i inventory/production/ deploy.yml
+
+deploy-ansible-staging:
+	@echo "🧪 Deploying to staging via Ansible..."
+	cd deploy/ansible && ansible-playbook -i inventory/staging/ deploy.yml
+
+deploy-check:
+	@echo "🔍 Checking deployment readiness..."
+	@echo "Ansible configuration:"
+	cd deploy/ansible && ansible --version
+	@echo "Inventory check:"
+	cd deploy/ansible && ansible-inventory --list
+
+scan-all:
+	@echo "🔍 Running scan across all servers..."
+	cd deploy/ansible && ansible-playbook -i inventory/production/ scan.yml
+
+scan-staging:
+	@echo "🔍 Running scan on staging servers..."
+	cd deploy/ansible && ansible-playbook -i inventory/staging/ scan.yml
+
+upgrade-all:
+	@echo "🔄 Running rolling upgrade..."
+	cd deploy/ansible && ansible-playbook -i inventory/production/ upgrade.yml
+
+upgrade-staging:
+	@echo "🔄 Upgrading staging environment..."
+	cd deploy/ansible && ansible-playbook -i inventory/staging/ upgrade.yml
+
+# ── Release ──────────────────────────────────────
+release-check:
+	@echo "🏷️  Checking release readiness..."
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION required. Usage: make release-tag VERSION=v1.0.0"; \
+		exit 1; \
+	fi
+	@echo "Current version: $(shell git describe --tags --always)"
+	@echo "New version: $(VERSION)"
+	@echo "Uncommitted changes:"
+	@git status --porcelain || echo "Working directory clean"
+
+release-tag:
+	@echo "🏷️  Creating release tag..."
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ VERSION required. Usage: make release-tag VERSION=v1.0.0"; \
+		exit 1; \
+	fi
+	make verify
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	git push origin $(VERSION)
+	@echo "✅ Tag $(VERSION) created and pushed!"
+	@echo "GitHub Actions will now build and create the release."
+
 # ── Help ────────────────────────────────────────
 help:
 	@echo "🛠️  Infra Auditor Makefile Commands:"
@@ -147,3 +223,19 @@ help:
 	@echo "Git:"
 	@echo "  commit-build  Test + commit build results"
 	@echo "  push          Commit + push to remote"
+	@echo ""
+	@echo "Deployment:"
+	@echo "  deploy-single HOST=server  Deploy to single server via SCP"
+	@echo "  deploy-ansible             Deploy via Ansible (production)"
+	@echo "  deploy-ansible-staging     Deploy to staging environment"
+	@echo "  deploy-check               Check deployment readiness"
+	@echo ""
+	@echo "Operations:"
+	@echo "  scan-all      Run scans across all servers"
+	@echo "  scan-staging  Run scans on staging"
+	@echo "  upgrade-all   Rolling upgrade (production)"
+	@echo "  upgrade-staging  Upgrade staging environment"
+	@echo ""
+	@echo "Release:"
+	@echo "  release-check VERSION=v1.0.0   Check release readiness"
+	@echo "  release-tag VERSION=v1.0.0     Create and push release tag"

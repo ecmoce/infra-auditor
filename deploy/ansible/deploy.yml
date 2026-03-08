@@ -1,0 +1,144 @@
+---
+# infra-auditor 전체 배포 플레이북
+# 사용법: ansible-playbook -i inventory/production/ deploy.yml
+
+- name: infra-auditor 전체 배포
+  hosts: all
+  become: yes
+  serial: "{{ deployment_batch_size | default('100%') }}"
+  
+  vars:
+    # 배포 설정
+    deployment_strategy: "{{ strategy | default('rolling') }}"  # rolling, parallel, canary
+    deployment_batch_size: "{{ batch_size | default('100%') }}"
+    
+    # 헬스체크 설정
+    health_check_enabled: "{{ health_check | default(true) }}"
+    health_check_retries: 5
+    health_check_delay: 10
+    
+    # 백업 설정 (배포 전)
+    pre_deploy_backup: "{{ backup | default(false) }}"
+    
+  pre_tasks:
+    - name: 시스템 정보 수집
+      setup:
+        gather_subset:
+          - "!all"
+          - "!facter"
+          - network
+          - hardware
+          - virtual
+          - distribution
+          - date_time
+      tags: always
+    
+    - name: 배포 시작 로그
+      debug:
+        msg: |
+          🚀 infra-auditor 배포 시작
+          대상: {{ inventory_hostname }} ({{ ansible_fqdn }})
+          전략: {{ deployment_strategy }}
+          배치: {{ deployment_batch_size }}
+          시간: {{ ansible_date_time.iso8601 }}
+      tags: always
+    
+    - name: 기존 서비스 상태 확인
+      systemd:
+        name: "{{ item }}"
+      register: existing_services
+      ignore_errors: yes
+      loop:
+        - infra-auditor-agent
+        - infra-auditor-aggregator
+      tags: always
+    
+    - name: 배포 전 백업 실행
+      include_tasks: tasks/backup.yml
+      when: pre_deploy_backup | bool
+      tags: backup
+
+  tasks:
+    # Aggregator 서버 배포
+    - block:
+        - name: Aggregator 배포
+          include_role:
+            name: infra-auditor-aggregator
+          vars:
+            run_health_check: "{{ health_check_enabled }}"
+        
+        - name: Aggregator 헬스체크
+          uri:
+            url: "http://{{ aggregator_bind_address }}:{{ aggregator_port }}/health"
+            method: GET
+            status_code: 200
+          retries: "{{ health_check_retries }}"
+          delay: "{{ health_check_delay }}"
+          when: health_check_enabled | bool
+          
+      when: "'aggregator' in group_names"
+      tags: aggregator
+    
+    # Agent 서버 배포
+    - block:
+        - name: Agent 배포
+          include_role:
+            name: infra-auditor-agent
+          vars:
+            run_initial_scan: false  # 초기 스캔은 별도로
+        
+        - name: Agent 바이너리 버전 확인
+          command: "{{ binary_path }} --version"
+          register: agent_version
+          changed_when: false
+          
+        - name: Agent 배포 결과
+          debug:
+            msg: "Agent 배포 완료: {{ agent_version.stdout }}"
+            
+      when: "'agent' in group_names or 'control' in group_names or 'compute' in group_names or 'network' in group_names or 'storage_ceph' in group_names or 'storage_s3' in group_names"
+      tags: agent
+
+  post_tasks:
+    - name: 배포 후 검증
+      include_tasks: tasks/verify.yml
+      tags: verify
+    
+    - name: 배포 완료 로그
+      debug:
+        msg: |
+          ✅ infra-auditor 배포 완료
+          서버: {{ inventory_hostname }}
+          시간: {{ ansible_date_time.iso8601 }}
+      tags: always
+
+  handlers:
+    - import_tasks: handlers/main.yml
+
+- name: 배포 요약 리포트
+  hosts: localhost
+  gather_facts: no
+  run_once: true
+  tasks:
+    - name: 배포 결과 요약
+      debug:
+        msg: |
+          
+          📊 infra-auditor 배포 결과 요약
+          ========================================
+          
+          총 서버 수: {{ groups['all'] | length }}
+          
+          Aggregator 서버:
+          {% for host in groups.get('aggregator', []) %}
+          - {{ host }}
+          {% endfor %}
+          
+          Agent 서버:
+          {% for host in groups.get('agent', []) + groups.get('control', []) + groups.get('compute', []) + groups.get('network', []) + groups.get('storage_ceph', []) + groups.get('storage_s3', []) %}
+          - {{ host }}
+          {% endfor %}
+          
+          배포 시간: {{ ansible_date_time.iso8601 }}
+          
+      tags: always

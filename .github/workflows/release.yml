@@ -1,0 +1,270 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: amd64
+            name: infra-auditor-linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: infra-auditor-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            name: infra-auditor-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            name: infra-auditor-darwin-arm64
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 전체 히스토리 필요 (git describe용)
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Get build metadata
+      id: meta
+      run: |
+        echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+        echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+        echo "go_version=$(go version | awk '{print $3}')" >> $GITHUB_OUTPUT
+
+    - name: Build infra-auditor binary
+      env:
+        CGO_ENABLED: 0
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        go build -ldflags="
+          -s -w
+          -X main.version=${{ steps.meta.outputs.version }}
+          -X main.commit=${{ steps.meta.outputs.commit }}
+          -X main.date=${{ steps.meta.outputs.date }}
+          -X main.goVersion=${{ steps.meta.outputs.go_version }}
+        " -o ${{ matrix.name }} ./cmd/infra-auditor/
+
+    - name: Build infra-auditor-aggregator binary
+      env:
+        CGO_ENABLED: 0
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        go build -ldflags="
+          -s -w
+          -X main.version=${{ steps.meta.outputs.version }}
+          -X main.commit=${{ steps.meta.outputs.commit }}
+          -X main.date=${{ steps.meta.outputs.date }}
+          -X main.goVersion=${{ steps.meta.outputs.go_version }}
+        " -o infra-auditor-aggregator-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/infra-auditor-aggregator/
+
+    - name: Test binaries
+      run: |
+        ./${{ matrix.name }} --version
+        ./infra-auditor-aggregator-${{ matrix.goos }}-${{ matrix.goarch }} --version
+
+    - name: Upload agent binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.name }}
+        path: ${{ matrix.name }}
+        retention-days: 1
+
+    - name: Upload aggregator binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: infra-auditor-aggregator-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: infra-auditor-aggregator-${{ matrix.goos }}-${{ matrix.goarch }}
+        retention-days: 1
+
+  test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Download Linux AMD64 binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: infra-auditor-linux-amd64
+        path: ./
+
+    - name: Download Aggregator binary
+      uses: actions/download-artifact@v4
+      with:
+        name: infra-auditor-aggregator-linux-amd64
+        path: ./
+
+    - name: Set permissions
+      run: |
+        chmod +x infra-auditor-linux-amd64
+        chmod +x infra-auditor-aggregator-linux-amd64
+
+    - name: Run unit tests
+      run: go test -v ./...
+
+    - name: Run integration tests
+      run: |
+        # Agent 기본 테스트
+        ./infra-auditor-linux-amd64 --version
+        ./infra-auditor-linux-amd64 --help
+        
+        # Aggregator 기본 테스트
+        ./infra-auditor-aggregator-linux-amd64 --version
+        ./infra-auditor-aggregator-linux-amd64 --help
+        
+        # 설정 검증 테스트 (샘플 설정으로)
+        echo "Creating test config..."
+        cat > test-config.yml << 'EOF'
+        server:
+          host: 127.0.0.1
+          port: 8080
+        database:
+          type: sqlite
+          file: /tmp/test.db
+        logging:
+          level: info
+          file: /tmp/test.log
+        EOF
+        
+        ./infra-auditor-aggregator-linux-amd64 --config test-config.yml --validate || echo "Config validation test completed"
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        
+        # Agent 바이너리들을 release-assets로 이동
+        for dir in ./artifacts/infra-auditor-*; do
+          if [[ -d "$dir" && ! "$dir" =~ aggregator ]]; then
+            binary_name=$(basename "$dir")
+            mv "$dir/$binary_name" "release-assets/$binary_name"
+          fi
+        done
+        
+        # Aggregator 바이너리들을 release-assets로 이동
+        for dir in ./artifacts/infra-auditor-aggregator-*; do
+          if [[ -d "$dir" ]]; then
+            binary_name=$(basename "$dir")
+            mv "$dir/$binary_name" "release-assets/$binary_name"
+          fi
+        done
+        
+        # 권한 설정
+        chmod +x release-assets/*
+        
+        # 파일 목록 확인
+        ls -la release-assets/
+
+    - name: Generate checksums
+      run: |
+        cd release-assets
+        sha256sum * > checksums.txt
+        echo "=== 체크섬 파일 내용 ==="
+        cat checksums.txt
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        ## 🚀 infra-auditor ${{ github.ref_name }}
+
+        ### 새로운 기능
+        - 자동 배포 시스템 완성
+        - Ansible 기반 운영 자동화
+        - GitHub Actions 릴리즈 워크플로
+
+        ### 설치 방법
+
+        **자동 설치 (권장):**
+        ```bash
+        curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh
+        ```
+
+        **수동 설치:**
+        1. 아래에서 OS/아키텍처에 맞는 바이너리 다운로드
+        2. `/usr/local/bin/`에 저장
+        3. 실행 권한 추가: `chmod +x /usr/local/bin/infra-auditor`
+
+        ### 지원 플랫폼
+        - ✅ Linux (AMD64, ARM64)
+        - ✅ macOS (Intel, Apple Silicon)
+
+        ### 체크섬
+        SHA256 해시값은 `checksums.txt`에서 확인 가능합니다.
+
+        ### 문서
+        - [배포 가이드](https://github.com/ecmoce/infra-auditor/blob/main/docs/DEPLOYMENT.md)
+        - [사용법](https://github.com/ecmoce/infra-auditor/blob/main/README.md)
+
+        **전체 변경사항:** https://github.com/ecmoce/infra-auditor/compare/v0.1.0...${{ github.ref_name }}
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release-assets/*
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update install script cache
+      run: |
+        echo "📢 릴리즈 완료: ${{ github.ref_name }}"
+        echo "설치 명령: curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh"

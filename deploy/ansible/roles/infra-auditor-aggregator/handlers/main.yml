@@ -1,0 +1,63 @@
+---
+# infra-auditor-aggregator handlers
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart infra-auditor-aggregator
+  systemd:
+    name: "{{ service_name }}"
+    state: restarted
+  listen: "restart infra-auditor-aggregator"
+
+- name: reload infra-auditor-aggregator
+  systemd:
+    name: "{{ service_name }}"
+    state: reloaded
+  listen: "reload infra-auditor-aggregator"
+
+- name: restart nginx
+  systemd:
+    name: nginx
+    state: restarted
+  listen: "restart nginx"
+
+- name: reload nginx
+  systemd:
+    name: nginx
+    state: reloaded
+  listen: "reload nginx"
+
+- name: restart firewalld
+  systemd:
+    name: firewalld
+    state: restarted
+  listen: "restart firewalld"
+
+- name: reload firewalld
+  command: firewall-cmd --reload
+  listen: "reload firewalld"
+
+- name: validate aggregator config
+  command: "{{ aggregator_binary_path }} --config {{ aggregator_config_path }} --validate"
+  register: config_validation
+  failed_when: config_validation.rc != 0
+  listen: "validate config"
+
+- name: backup current config
+  copy:
+    src: "{{ aggregator_config_path }}"
+    dest: "{{ aggregator_config_path }}.backup.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+    backup: no
+  listen: "backup config"
+
+- name: test aggregator service
+  uri:
+    url: "http://{{ aggregator_bind_address }}:{{ aggregator_port }}/health"
+    method: GET
+    status_code: 200
+  retries: 3
+  delay: 5
+  listen: "test service"

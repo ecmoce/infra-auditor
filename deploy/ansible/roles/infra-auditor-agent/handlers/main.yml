@@ -1,0 +1,13 @@
+---
+# infra-auditor-agent 핸들러
+
+- name: restart crond
+  service:
+    name: "{{ 'crond' if ansible_os_family == 'RedHat' else 'cron' }}"
+    state: restarted
+  listen: restart crond
+
+- name: restart infra-auditor-scan
+  debug:
+    msg: "infra-auditor 바이너리 업데이트됨, 다음 cron 실행 시 새 버전 사용"
+  listen: restart infra-auditor-scan

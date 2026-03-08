@@ -673,3 +673,351 @@ Aggregator 서버가 느려진다면:
 4. **로드밸런싱**: 여러 Aggregator 서버 운영
 
 이런 배포 전략과 운영 노하우들은 실제 프로덕션 환경에서 수백 대의 서버를 관리하면서 얻은 경험입니다. 처음에는 간단하게 시작해서 필요에 따라 점진적으로 복잡한 기능들을 추가하는 것을 권장합니다.
+
+## 자동 설치 스크립트 (install.sh)
+
+### 기본 사용법
+
+가장 간단한 설치 방법입니다:
+
+```bash
+# 자동 설치 (권장)
+curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh
+
+# 또는 sudo 권한으로
+curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sudo sh
+```
+
+### 고급 옵션
+
+```bash
+# 강제 재설치 (기존 버전이 있어도)
+FORCE=1 curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh
+
+# 디버그 모드
+DEBUG=1 curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh
+
+# 특정 디렉토리에 설치 (기본: /usr/local/bin)
+INSTALL_DIR=/opt/bin curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sh
+```
+
+### 배포 자동화에서 활용
+
+```bash
+#!/bin/bash
+# bulk-install.sh
+
+SERVERS=(
+  "server-01.example.com"
+  "server-02.example.com"
+  # ... 서버 목록
+)
+
+for server in "${SERVERS[@]}"; do
+  echo "Installing on $server..."
+  ssh "$server" "curl -fsSL https://raw.githubusercontent.com/ecmoce/infra-auditor/main/install.sh | sudo sh"
+  
+  # 설치 확인
+  if ssh "$server" "infra-auditor --version"; then
+    echo "✅ $server: 설치 완료"
+  else
+    echo "❌ $server: 설치 실패"
+  fi
+done
+```
+
+### install.sh 특징
+
+- **자동 아키텍처 감지**: x86_64/aarch64/armv7l 지원
+- **체크섬 검증**: 다운로드한 파일의 무결성 확인
+- **기존 설치 백업**: 업그레이드 시 이전 버전 보존
+- **의존성 검사**: curl, tar, gzip 등 필수 프로그램 확인
+- **권한 관리**: 적절한 소유권과 실행 권한 설정
+
+## GitHub Actions 자동 릴리즈
+
+### 릴리즈 프로세스
+
+infra-auditor는 GitHub Actions를 통해 자동으로 새 버전을 빌드하고 배포합니다.
+
+```bash
+# 새 릴리즈 생성 방법
+git tag v1.2.0
+git push origin v1.2.0
+
+# 또는 Makefile 사용
+make release-tag VERSION=v1.2.0
+```
+
+### 자동 빌드 매트릭스
+
+각 릴리즈마다 다음 바이너리들이 자동으로 빌드됩니다:
+
+| 플랫폼 | 아키텍처 | 파일명 |
+|--------|----------|--------|
+| Linux | x86_64 | `infra-auditor-linux-amd64` |
+| Linux | ARM64 | `infra-auditor-linux-arm64` |
+| macOS | Intel | `infra-auditor-darwin-amd64` |
+| macOS | Apple Silicon | `infra-auditor-darwin-arm64` |
+| Linux | x86_64 | `infra-auditor-aggregator-linux-amd64` |
+| Linux | ARM64 | `infra-auditor-aggregator-linux-arm64` |
+| macOS | Intel | `infra-auditor-aggregator-darwin-amd64` |
+| macOS | Apple Silicon | `infra-auditor-aggregator-darwin-arm64` |
+
+### 빌드 정보
+
+각 바이너리에는 다음 정보가 포함됩니다:
+
+```bash
+$ infra-auditor --version
+infra-auditor v1.2.0 (commit: abc1234, built: 2024-03-15T10:30:00Z, go: go1.22.1)
+```
+
+### CI/CD 파이프라인
+
+1. **코드 품질 검사**
+   - go fmt, go vet 실행
+   - 단위 테스트 실행
+   - 코드 커버리지 측정
+
+2. **빌드 및 테스트**
+   - 모든 플랫폼 바이너리 빌드
+   - 바이너리 동작 검증
+   - 통합 테스트 실행
+
+3. **릴리즈 생성**
+   - SHA256 체크섬 생성
+   - GitHub Release 자동 생성
+   - 릴리즈 노트 자동 생성
+
+## 배포 방법 비교표
+
+| 방법 | 규모 | 장점 | 단점 | 추천 시나리오 |
+|------|------|------|------|---------------|
+| **install.sh** | 1-100대 | 간단함, 자동화 가능 | 중앙 관리 부족 | 소규모, 개발/테스트 |
+| **SCP 배포** | 10-200대 | 빠름, 직접 제어 | 수동 작업 필요 | 동질적 환경 |
+| **Ansible** | 50-5000대 | 설정 관리, 멱등성 | 학습 곡선 | 대규모, 이기종 환경 |
+| **패키지 관리자** | 제한 없음 | OS 통합, 업데이트 | 패키지 생성 필요 | 엔터프라이즈 |
+| **Docker** | 제한 없음 | 환경 일관성 | 오버헤드 | 컨테이너 기반 인프라 |
+
+### 선택 기준
+
+**소규모 (1-50대)**
+- install.sh 또는 직접 다운로드
+- 단순하고 빠른 시작 가능
+
+**중규모 (50-500대)**
+- Ansible 또는 SCP 스크립트
+- 설정 관리와 자동화 균형
+
+**대규모 (500대+)**
+- Ansible + 패키지 관리자
+- 중앙 집중식 관리 필수
+
+**클라우드 환경**
+- Terraform + Ansible
+- IaC (Infrastructure as Code) 통합
+
+## 롤백 절차
+
+### 1. 바이너리 롤백
+
+```bash
+# install.sh로 설치했다면 백업 파일 활용
+sudo cp /usr/local/bin/infra-auditor.backup.20240315_103000 /usr/local/bin/infra-auditor
+
+# 권한 복원
+sudo chmod +x /usr/local/bin/infra-auditor
+
+# 동작 확인
+infra-auditor --version
+```
+
+### 2. Ansible 롤백
+
+```bash
+# 이전 버전으로 롤백
+cd deploy/ansible
+ansible-playbook -i inventory/production/ upgrade.yml -e target_version=v1.1.0
+
+# 또는 특정 서버만
+ansible-playbook -i inventory/production/ upgrade.yml -l web-servers -e target_version=v1.1.0
+```
+
+### 3. 설정 롤백
+
+```bash
+# Aggregator 설정 롤백
+sudo cp /etc/infra-auditor/aggregator.yml.backup /etc/infra-auditor/aggregator.yml
+sudo systemctl restart infra-auditor-aggregator
+
+# 확인
+sudo systemctl status infra-auditor-aggregator
+```
+
+### 4. 데이터베이스 롤백
+
+```bash
+# SQLite 데이터베이스 롤백
+sudo systemctl stop infra-auditor-aggregator
+sudo cp /var/lib/infra-auditor/backups/database_backup_20240315.db /var/lib/infra-auditor/aggregator.db
+sudo systemctl start infra-auditor-aggregator
+```
+
+### 5. 응급 복구 스크립트
+
+```bash
+#!/bin/bash
+# emergency-rollback.sh
+
+SERVER="$1"
+BACKUP_VERSION="$2"
+
+if [[ -z "$SERVER" || -z "$BACKUP_VERSION" ]]; then
+  echo "Usage: $0 <server> <backup-version>"
+  echo "Example: $0 web-01.example.com v1.1.0"
+  exit 1
+fi
+
+echo "🚨 Emergency rollback: $SERVER to $BACKUP_VERSION"
+
+# 서비스 중지
+ssh "$SERVER" "sudo systemctl stop infra-auditor-aggregator || true"
+
+# 바이너리 롤백
+ssh "$SERVER" "sudo curl -L https://github.com/ecmoce/infra-auditor/releases/download/$BACKUP_VERSION/infra-auditor-linux-amd64 -o /usr/local/bin/infra-auditor-aggregator && sudo chmod +x /usr/local/bin/infra-auditor-aggregator"
+
+# 서비스 재시작
+ssh "$SERVER" "sudo systemctl start infra-auditor-aggregator"
+
+# 상태 확인
+ssh "$SERVER" "sudo systemctl status infra-auditor-aggregator && /usr/local/bin/infra-auditor-aggregator --version"
+
+echo "✅ Rollback completed for $SERVER"
+```
+
+## 모니터링 및 알림
+
+### Prometheus 메트릭
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'infra-auditor'
+    static_configs:
+      - targets:
+        - 'aggregator-01:8080'
+        - 'aggregator-02:8080'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+```
+
+### Grafana 대시보드
+
+주요 메트릭:
+- 활성 에이전트 수
+- 스캔 성공/실패율
+- 응답 시간
+- 데이터베이스 크기
+- 디스크 사용량
+
+### 알림 규칙
+
+```yaml
+# alerting.yml
+groups:
+  - name: infra-auditor
+    rules:
+      - alert: AgentDown
+        expr: infra_auditor_agents_active < 0.95 * infra_auditor_agents_total
+        for: 5m
+        annotations:
+          summary: "Some infra-auditor agents are down"
+      
+      - alert: ScanFailure
+        expr: rate(infra_auditor_scans_failed[5m]) > 0.1
+        for: 2m
+        annotations:
+          summary: "High scan failure rate detected"
+```
+
+## 보안 고려사항
+
+### 네트워크 보안
+
+1. **방화벽 규칙**
+   ```bash
+   # Aggregator 포트만 허용
+   sudo ufw allow 8080/tcp comment "infra-auditor-aggregator"
+   ```
+
+2. **TLS 설정**
+   ```yaml
+   # aggregator.yml
+   security:
+     tls:
+       enabled: true
+       cert_file: /etc/ssl/certs/infra-auditor.crt
+       key_file: /etc/ssl/private/infra-auditor.key
+   ```
+
+3. **API 토큰**
+   ```yaml
+   api_tokens:
+     - name: monitoring
+       token: "your-secure-token-here"
+       permissions: ["read"]
+   ```
+
+### 데이터 보호
+
+1. **암호화된 저장**
+   ```bash
+   # 데이터 디렉토리 암호화
+   sudo cryptsetup luksFormat /dev/sdb
+   sudo cryptsetup open /dev/sdb infra-auditor-data
+   sudo mkfs.ext4 /dev/mapper/infra-auditor-data
+   ```
+
+2. **접근 권한**
+   ```bash
+   # 최소 권한 원칙
+   sudo chown infra-auditor:infra-auditor /var/lib/infra-auditor
+   sudo chmod 700 /var/lib/infra-auditor
+   ```
+
+## 성능 최적화
+
+### Aggregator 튜닝
+
+1. **데이터베이스 최적화**
+   ```sql
+   -- SQLite 설정
+   PRAGMA journal_mode=WAL;
+   PRAGMA synchronous=NORMAL;
+   PRAGMA temp_store=MEMORY;
+   PRAGMA mmap_size=268435456; -- 256MB
+   ```
+
+2. **메모리 설정**
+   ```yaml
+   # systemd 서비스 파일
+   MemoryLimit=2G
+   LimitNOFILE=65536
+   ```
+
+### Agent 최적화
+
+1. **스캔 간격 조정**
+   ```bash
+   # 부하가 적은 시간대에 집중
+   0 2,14 * * * /usr/local/bin/infra-auditor-scan.sh
+   ```
+
+2. **병렬 처리**
+   ```bash
+   # CPU 코어 수에 맞춰 조정
+   infra-auditor --workers 4 --role compute
+   ```
+
+이제 infra-auditor는 완전한 배포 자동화 시스템을 갖추었습니다. 소규모 환경에서는 install.sh로 간단히 시작하고, 대규모 환경에서는 Ansible을 활용한 전문적인 관리가 가능합니다.

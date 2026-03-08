@@ -1,0 +1,304 @@
+---
+# infra-auditor 롤링 업데이트 플레이북
+# 사용법: ansible-playbook -i inventory/production/ upgrade.yml
+
+- name: infra-auditor 롤링 업데이트
+  hosts: all
+  become: yes
+  serial: "{{ upgrade_batch_size | default('25%') }}"  # 한 번에 25%씩 업데이트
+  
+  vars:
+    # 업그레이드 설정
+    upgrade_strategy: "{{ strategy | default('safe') }}"  # safe, fast, canary
+    upgrade_batch_size: "{{ batch_size | default('25%') }}"
+    
+    # 안전 설정
+    backup_before_upgrade: "{{ backup | default(true) }}"
+    health_check_enabled: "{{ health_check | default(true) }}"
+    rollback_on_failure: "{{ rollback | default(false) }}"
+    
+    # 버전 설정
+    target_version: "{{ version | default('latest') }}"
+    min_uptime: "{{ min_uptime | default(300) }}"  # 5분
+    
+    # 다운타임 설정
+    max_downtime: "{{ max_downtime | default(30) }}"  # 30초
+    wait_between_batches: "{{ wait | default(60) }}"  # 1분
+    
+  pre_tasks:
+    - name: 시스템 정보 수집
+      setup:
+        gather_subset:
+          - "!all"
+          - "!facter"
+          - date_time
+          - distribution
+      tags: always
+    
+    - name: 업그레이드 시작 로그
+      debug:
+        msg: |
+          🔄 infra-auditor 업그레이드 시작
+          서버: {{ inventory_hostname }} ({{ ansible_fqdn }})
+          전략: {{ upgrade_strategy }}
+          대상 버전: {{ target_version }}
+          시간: {{ ansible_date_time.iso8601 }}
+      tags: always
+    
+    - name: 현재 버전 확인
+      command: "{{ binary_path | default('/usr/local/bin/infra-auditor') }} --version"
+      register: current_version
+      ignore_errors: yes
+      changed_when: false
+      tags: always
+    
+    - name: 서비스 상태 확인
+      systemd:
+        name: "{{ item }}"
+      register: service_status
+      ignore_errors: yes
+      loop:
+        - infra-auditor-agent
+        - infra-auditor-aggregator
+      tags: always
+    
+    - name: 업그레이드 전 백업
+      include_tasks: tasks/backup.yml
+      when: backup_before_upgrade | bool
+      tags: backup
+    
+    # 카나리 배포 (첫 번째 서버만)
+    - name: 카나리 배포 확인
+      debug:
+        msg: |
+          🐦 카나리 배포 모드
+          이 서버는 카나리로 먼저 업그레이드됩니다.
+          문제가 없으면 나머지 서버로 진행합니다.
+      when: 
+        - upgrade_strategy == 'canary'
+        - inventory_hostname == ansible_play_hosts[0]
+      tags: canary
+
+  tasks:
+    # Aggregator 업그레이드 (서비스 다운타임 최소화)
+    - block:
+        - name: Aggregator 업그레이드 시작
+          debug:
+            msg: "🔧 Aggregator 업그레이드 시작: {{ inventory_hostname }}"
+        
+        - name: 현재 설정 백업
+          copy:
+            src: "{{ aggregator_config_path }}"
+            dest: "{{ aggregator_config_path }}.pre-upgrade"
+            remote_src: yes
+            backup: yes
+        
+        - name: 새 바이너리 다운로드 (임시 위치)
+          get_url:
+            url: "{{ github_release_base_url }}/{{ aggregator_binary_name }}-linux-{{ system_arch }}"
+            dest: "{{ aggregator_binary_path }}.new"
+            mode: '0755'
+            timeout: "{{ download_timeout | default(300) }}"
+        
+        - name: 새 바이너리 테스트
+          command: "{{ aggregator_binary_path }}.new --version"
+          register: new_version_check
+          failed_when: new_version_check.rc != 0
+        
+        - name: 설정 파일 호환성 검증
+          command: "{{ aggregator_binary_path }}.new --config {{ aggregator_config_path }} --validate"
+          register: config_validation
+          failed_when: config_validation.rc != 0
+        
+        - name: 서비스 중지
+          systemd:
+            name: "{{ service_name }}"
+            state: stopped
+          register: service_stop_time
+        
+        - name: 바이너리 교체
+          copy:
+            src: "{{ aggregator_binary_path }}.new"
+            dest: "{{ aggregator_binary_path }}"
+            remote_src: yes
+            mode: '0755'
+            backup: yes
+        
+        - name: 임시 바이너리 정리
+          file:
+            path: "{{ aggregator_binary_path }}.new"
+            state: absent
+        
+        - name: 서비스 시작
+          systemd:
+            name: "{{ service_name }}"
+            state: started
+          register: service_start_result
+        
+        - name: 서비스 안정화 대기
+          wait_for:
+            port: "{{ aggregator_port }}"
+            host: "{{ aggregator_bind_address }}"
+            delay: 5
+            timeout: "{{ max_downtime }}"
+        
+        - name: Aggregator 헬스체크
+          uri:
+            url: "http://{{ aggregator_bind_address }}:{{ aggregator_port }}/health"
+            method: GET
+            status_code: 200
+          retries: 10
+          delay: 3
+          when: health_check_enabled
+        
+        - name: 업그레이드 완료 확인
+          debug:
+            msg: |
+              ✅ Aggregator 업그레이드 완료
+              이전 버전: {{ current_version.stdout | default('unknown') }}
+              새 버전: {{ new_version_check.stdout }}
+              다운타임: ~{{ max_downtime }}초
+              
+      when: "'aggregator' in group_names"
+      tags: aggregator
+
+    # Agent 업그레이드 (무중단)
+    - block:
+        - name: Agent 업그레이드 시작
+          debug:
+            msg: "🔧 Agent 업그레이드 시작: {{ inventory_hostname }}"
+        
+        - name: 새 바이너리 다운로드 (임시 위치)
+          get_url:
+            url: "{{ github_release_base_url }}/{{ binary_name }}-linux-{{ system_arch }}"
+            dest: "{{ binary_path }}.new"
+            mode: '0755'
+            timeout: "{{ download_timeout | default(300) }}"
+        
+        - name: 새 바이너리 테스트
+          command: "{{ binary_path }}.new --version"
+          register: new_agent_version
+          failed_when: new_agent_version.rc != 0
+        
+        - name: 기존 바이너리 백업
+          copy:
+            src: "{{ binary_path }}"
+            dest: "{{ binary_path }}.backup.{{ ansible_date_time.epoch }}"
+            remote_src: yes
+            backup: no
+        
+        - name: 바이너리 교체
+          copy:
+            src: "{{ binary_path }}.new"
+            dest: "{{ binary_path }}"
+            remote_src: yes
+            mode: '0755'
+        
+        - name: 임시 바이너리 정리
+          file:
+            path: "{{ binary_path }}.new"
+            state: absent
+        
+        - name: 새 버전으로 테스트 스캔
+          command: "{{ binary_path }} --role {{ server_role | default('unknown') }} --dry-run"
+          register: test_scan
+          failed_when: test_scan.rc != 0
+          timeout: 60
+        
+        - name: Agent 업그레이드 완료 확인
+          debug:
+            msg: |
+              ✅ Agent 업그레이드 완료
+              이전 버전: {{ current_version.stdout | default('unknown') }}
+              새 버전: {{ new_agent_version.stdout }}
+              다운타임: 없음
+              
+      when: "'agent' in group_names or 'control' in group_names or 'compute' in group_names or 'network' in group_names or 'storage_ceph' in group_names or 'storage_s3' in group_names"
+      tags: agent
+
+  post_tasks:
+    - name: 업그레이드 후 검증
+      include_tasks: tasks/verify.yml
+      tags: verify
+    
+    - name: 서비스 상태 최종 확인
+      systemd:
+        name: "{{ item }}"
+      register: final_service_status
+      loop:
+        - infra-auditor-agent
+        - infra-auditor-aggregator
+      ignore_errors: yes
+      tags: verify
+    
+    - name: 업그레이드 완료 로그
+      debug:
+        msg: |
+          ✅ 업그레이드 완료: {{ inventory_hostname }}
+          시간: {{ ansible_date_time.iso8601 }}
+          {% if current_version.stdout is defined %}
+          버전 변경: {{ current_version.stdout }} → {{ (new_version_check.stdout if 'aggregator' in group_names else new_agent_version.stdout) | default('unknown') }}
+          {% endif %}
+      tags: always
+    
+    # 배치 간 대기
+    - name: 배치 간 대기
+      pause:
+        seconds: "{{ wait_between_batches }}"
+      when: 
+        - upgrade_strategy == 'safe'
+        - inventory_hostname != ansible_play_hosts[-1]  # 마지막 서버가 아닌 경우
+      run_once: true
+      delegate_to: localhost
+      tags: always
+
+  rescue:
+    # 업그레이드 실패 시 롤백
+    - name: 업그레이드 실패 감지
+      debug:
+        msg: |
+          ❌ 업그레이드 실패: {{ inventory_hostname }}
+          {% if rollback_on_failure %}
+          롤백을 시도합니다...
+          {% else %}
+          수동 복구가 필요합니다.
+          {% endif %}
+      tags: always
+    
+    - name: 롤백 실행
+      include_tasks: tasks/rollback.yml
+      when: rollback_on_failure | bool
+      tags: rollback
+    
+    - name: 업그레이드 실패 알림
+      debug:
+        msg: |
+          🚨 업그레이드 실패 알림
+          서버: {{ inventory_hostname }}
+          오류: {{ ansible_failed_result.msg | default('Unknown error') }}
+          시간: {{ ansible_date_time.iso8601 }}
+      tags: always
+
+# 업그레이드 완료 리포트
+- name: 업그레이드 완료 리포트
+  hosts: localhost
+  gather_facts: no
+  run_once: true
+  tasks:
+    - name: 업그레이드 요약 리포트
+      debug:
+        msg: |
+          
+          🔄 infra-auditor 업그레이드 완료
+          ====================================
+          
+          업그레이드 전략: {{ upgrade_strategy }}
+          대상 서버: {{ groups['all'] | length }}
+          성공: {{ ansible_play_hosts | length }}
+          실패: {{ groups['all'] | length - ansible_play_hosts | length }}
+          
+          배치 크기: {{ upgrade_batch_size }}
+          총 소요 시간: ~{{ ((groups['all'] | length / (upgrade_batch_size | regex_replace('%', '') | int / 100)) * (wait_between_batches | int + max_downtime | int)) | int }}초
+          
+          업그레이드 시간: {{ ansible_date_time.iso8601 }}
+      tags: always

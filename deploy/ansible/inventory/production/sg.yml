@@ -1,0 +1,53 @@
+---
+# 싱가포르 리전 인벤토리
+all:
+  children:
+    control:
+      hosts:
+        ctrl-sg-01:
+          ansible_host: "{{ ctrl_sg_01_ip | default('10.0.1.10') }}"
+          role: control
+        ctrl-sg-02:
+          ansible_host: "{{ ctrl_sg_02_ip | default('10.0.1.11') }}"
+          role: control
+      vars:
+        region: singapore
+        
+    compute:
+      hosts:
+        cmp-sg-[01:50]:
+          ansible_host: "10.0.2.{{ item }}"
+          role: compute
+      vars:
+        region: singapore
+        
+    network:
+      hosts:
+        net-sg-[01:10]:
+          ansible_host: "10.0.3.{{ item }}"
+          role: network
+      vars:
+        region: singapore
+        
+    storage_ceph:
+      hosts:
+        sto-sg-[01:30]:
+          ansible_host: "10.0.4.{{ item }}"
+          role: storage-ceph
+      vars:
+        region: singapore
+        
+    storage_s3:
+      hosts:
+        s3-sg-[01:10]:
+          ansible_host: "10.0.5.{{ item }}"
+          role: storage-s3
+      vars:
+        region: singapore
+        
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: "{{ sg_ssh_key | default('~/.ssh/sg-servers') }}"
+    aggregator_url: "{{ sg_aggregator_url | default('https://aggregator-sg.infra.company.com') }}"
+    region_code: sg
+    timezone: Asia/Singapore

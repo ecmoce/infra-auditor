@@ -1,0 +1,40 @@
+---
+# 스테이징 환경 인벤토리
+all:
+  children:
+    control:
+      hosts:
+        ctrl-staging-01:
+          ansible_host: "{{ staging_ctrl_ip | default('10.99.1.10') }}"
+          role: control
+          
+    compute:
+      hosts:
+        cmp-staging-[01:05]:
+          ansible_host: "10.99.2.{{ item }}"
+          role: compute
+          
+    network:
+      hosts:
+        net-staging-01:
+          ansible_host: "10.99.3.10"
+          role: network
+          
+    storage_ceph:
+      hosts:
+        sto-staging-[01:03]:
+          ansible_host: "10.99.4.{{ item }}"
+          role: storage-ceph
+          
+    storage_s3:
+      hosts:
+        s3-staging-01:
+          ansible_host: "10.99.5.10"
+          role: storage-s3
+          
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: "{{ staging_ssh_key | default('~/.ssh/staging-servers') }}"
+    aggregator_url: "{{ staging_aggregator_url | default('https://aggregator-staging.infra.company.com') }}"
+    region_code: staging
+    timezone: Asia/Seoul

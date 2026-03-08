@@ -1,0 +1,134 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# infra-auditor-aggregator 백업 스크립트
+
+set -euo pipefail
+
+# 설정
+BACKUP_DIR="{{ aggregator_data_path }}/backups"
+DATA_PATH="{{ aggregator_data_path }}"
+CONFIG_PATH="{{ aggregator_config_path }}"
+RETENTION_DAYS={{ backup_retention_days }}
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_NAME="aggregator_backup_${TIMESTAMP}"
+LOG_FILE="{{ aggregator_log_path }}/backup.log"
+
+# 로깅 함수
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "${LOG_FILE}"
+}
+
+# 백업 시작
+log "INFO: 백업 시작 - ${BACKUP_NAME}"
+
+# 백업 디렉토리 생성
+mkdir -p "${BACKUP_DIR}"
+
+# 임시 백업 디렉토리
+TEMP_DIR=$(mktemp -d -p "${BACKUP_DIR}" backup.XXXXXX)
+trap "rm -rf ${TEMP_DIR}" EXIT
+
+log "INFO: 임시 디렉토리 생성: ${TEMP_DIR}"
+
+# 서비스 일시 정지 (선택적)
+{% if backup_stop_service | default(false) %}
+log "INFO: 서비스 일시 정지"
+systemctl stop {{ service_name }} || log "WARN: 서비스 정지 실패"
+sleep 2
+{% endif %}
+
+# 데이터베이스 백업
+if [[ -f "{{ db_file }}" ]]; then
+    log "INFO: 데이터베이스 백업 중"
+    cp "{{ db_file }}" "${TEMP_DIR}/database.db"
+    
+    # SQLite 백업 검증
+    sqlite3 "${TEMP_DIR}/database.db" "PRAGMA integrity_check;" > /dev/null
+    log "INFO: 데이터베이스 무결성 확인 완료"
+else
+    log "WARN: 데이터베이스 파일 없음: {{ db_file }}"
+fi
+
+# 설정 파일 백업
+log "INFO: 설정 파일 백업 중"
+cp "${CONFIG_PATH}" "${TEMP_DIR}/aggregator.yml"
+
+# 로그 파일 백업 (최근 7일)
+log "INFO: 로그 파일 백업 중"
+mkdir -p "${TEMP_DIR}/logs"
+find "{{ aggregator_log_path }}" -name "*.log*" -mtime -7 -exec cp {} "${TEMP_DIR}/logs/" \; 2>/dev/null || true
+
+# 정적 파일 백업 (있는 경우)
+STATIC_PATH="{{ dashboard_static_path | default('/var/lib/infra-auditor/static') }}"
+if [[ -d "${STATIC_PATH}" ]]; then
+    log "INFO: 정적 파일 백업 중"
+    cp -r "${STATIC_PATH}" "${TEMP_DIR}/static"
+fi
+
+# 서비스 재시작
+{% if backup_stop_service | default(false) %}
+log "INFO: 서비스 재시작"
+systemctl start {{ service_name }} || log "ERROR: 서비스 시작 실패"
+{% endif %}
+
+# 백업 압축
+log "INFO: 백업 압축 중"
+cd "${BACKUP_DIR}"
+tar -czf "${BACKUP_NAME}.tar.gz" -C "${TEMP_DIR}" .
+
+# 체크섬 생성
+sha256sum "${BACKUP_NAME}.tar.gz" > "${BACKUP_NAME}.sha256"
+
+# 백업 파일 정보
+BACKUP_SIZE=$(du -h "${BACKUP_NAME}.tar.gz" | cut -f1)
+log "INFO: 백업 완료 - ${BACKUP_NAME}.tar.gz (${BACKUP_SIZE})"
+
+# 메타데이터 파일 생성
+cat > "${BACKUP_NAME}.info" << EOF
+backup_name: ${BACKUP_NAME}
+timestamp: ${TIMESTAMP}
+hostname: $(hostname)
+version: $({{ aggregator_binary_path }} --version 2>/dev/null || echo "unknown")
+size: ${BACKUP_SIZE}
+files_included:
+$(tar -tzf "${BACKUP_NAME}.tar.gz" | head -20)
+EOF
+
+# 오래된 백업 정리
+log "INFO: 오래된 백업 정리 중 (${RETENTION_DAYS}일 이전)"
+find "${BACKUP_DIR}" -name "aggregator_backup_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
+find "${BACKUP_DIR}" -name "aggregator_backup_*.sha256" -mtime +${RETENTION_DAYS} -delete
+find "${BACKUP_DIR}" -name "aggregator_backup_*.info" -mtime +${RETENTION_DAYS} -delete
+
+# 디스크 사용량 확인
+DISK_USAGE=$(df "${BACKUP_DIR}" | awk 'NR==2 {print $5}' | sed 's/%//')
+if [[ ${DISK_USAGE} -gt 90 ]]; then
+    log "WARN: 디스크 사용량 높음: ${DISK_USAGE}%"
+fi
+
+# 백업 검증
+log "INFO: 백업 검증 중"
+if sha256sum -c "${BACKUP_NAME}.sha256" >/dev/null 2>&1; then
+    log "INFO: 백업 체크섬 검증 완료"
+else
+    log "ERROR: 백업 체크섬 검증 실패"
+    exit 1
+fi
+
+# 백업 목록 표시
+log "INFO: 현재 백업 목록:"
+ls -lah "${BACKUP_DIR}"/aggregator_backup_*.tar.gz | tail -5 | while read line; do
+    log "  ${line}"
+done
+
+log "INFO: 백업 완료 - ${BACKUP_NAME}.tar.gz"
+
+# 선택적 알림 (설정된 경우)
+{% if backup_notifications | default(false) %}
+# Slack 알림
+if command -v curl >/dev/null 2>&1 && [[ -n "{{ slack_webhook_url | default('') }}" ]]; then
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"✅ Infra Auditor 백업 완료\\n서버: $(hostname)\\n파일: ${BACKUP_NAME}.tar.gz\\n크기: ${BACKUP_SIZE}\"}" \
+        "{{ slack_webhook_url }}" >/dev/null 2>&1 || log "WARN: Slack 알림 실패"
+fi
+{% endif %}

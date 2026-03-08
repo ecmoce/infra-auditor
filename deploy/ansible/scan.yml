@@ -1,0 +1,248 @@
+---
+# infra-auditor 전체 스캔 트리거 플레이북
+# 사용법: ansible-playbook -i inventory/production/ scan.yml
+
+- name: infra-auditor 전체 스캔 실행
+  hosts: all:!aggregator
+  become: yes
+  serial: "{{ scan_batch_size | default('50%') }}"
+  
+  vars:
+    # 스캔 설정
+    scan_type: "{{ type | default('full') }}"  # full, quick, custom
+    scan_timeout: "{{ timeout | default(300) }}"
+    scan_parallel: "{{ parallel | default(true) }}"
+    scan_batch_size: "{{ batch_size | default('50%') }}"
+    
+    # 결과 수집 설정
+    collect_results: "{{ collect | default(true) }}"
+    results_format: "{{ format | default('json') }}"  # json, yaml, text
+    
+    # 알림 설정
+    notify_completion: "{{ notify | default(false) }}"
+    
+  pre_tasks:
+    - name: 시스템 상태 확인
+      setup:
+        gather_subset:
+          - "!all"
+          - "!facter"
+          - date_time
+      tags: always
+    
+    - name: 스캔 시작 로그
+      debug:
+        msg: |
+          🔍 infra-auditor 스캔 시작
+          서버: {{ inventory_hostname }} ({{ ansible_fqdn }})
+          타입: {{ scan_type }}
+          시간: {{ ansible_date_time.iso8601 }}
+      tags: always
+    
+    - name: infra-auditor 바이너리 존재 확인
+      stat:
+        path: "{{ binary_path }}"
+      register: binary_check
+      failed_when: not binary_check.stat.exists
+    
+    - name: 스캔 스크립트 존재 확인
+      stat:
+        path: /usr/local/bin/infra-auditor-scan.sh
+      register: script_check
+      failed_when: not script_check.stat.exists
+    
+  tasks:
+    # 전체 스캔 (기본)
+    - block:
+        - name: 전체 스캔 실행
+          shell: |
+            /usr/local/bin/infra-auditor-scan.sh
+          register: full_scan_result
+          async: "{{ scan_timeout }}"
+          poll: "{{ 0 if scan_parallel else 5 }}"
+          
+        - name: 전체 스캔 결과 대기
+          async_status:
+            jid: "{{ full_scan_result.ansible_job_id }}"
+          register: full_scan_job
+          until: full_scan_job.finished
+          retries: "{{ (scan_timeout / 10) | int }}"
+          delay: 10
+          when: scan_parallel
+          
+      when: scan_type == 'full'
+      tags: scan_full
+    
+    # 빠른 스캔 (기본 체크만)
+    - block:
+        - name: 빠른 스캔 실행
+          command: >
+            {{ binary_path }}
+            --role {{ server_role | default('unknown') }}
+            --output-format json
+            --quick-scan
+          register: quick_scan_result
+          async: 120
+          poll: "{{ 0 if scan_parallel else 5 }}"
+          
+        - name: 빠른 스캔 결과 대기
+          async_status:
+            jid: "{{ quick_scan_result.ansible_job_id }}"
+          register: quick_scan_job
+          until: quick_scan_job.finished
+          retries: 12
+          delay: 10
+          when: scan_parallel
+          
+      when: scan_type == 'quick'
+      tags: scan_quick
+    
+    # 사용자 정의 스캔
+    - block:
+        - name: 사용자 정의 스캔 실행
+          command: >
+            {{ binary_path }}
+            --role {{ server_role | default('unknown') }}
+            --output-format {{ results_format }}
+            {{ custom_options | default('') }}
+          register: custom_scan_result
+          async: "{{ scan_timeout }}"
+          poll: "{{ 0 if scan_parallel else 5 }}"
+          
+        - name: 사용자 정의 스캔 결과 대기
+          async_status:
+            jid: "{{ custom_scan_result.ansible_job_id }}"
+          register: custom_scan_job
+          until: custom_scan_job.finished
+          retries: "{{ (scan_timeout / 10) | int }}"
+          delay: 10
+          when: scan_parallel
+          
+      when: scan_type == 'custom'
+      tags: scan_custom
+    
+    # 결과 수집
+    - name: 스캔 결과 파일 확인
+      find:
+        paths: /var/log/infra-auditor
+        patterns: "scan_*.{{ results_format }}"
+        age: -1d
+      register: scan_files
+      when: collect_results
+      tags: results
+    
+    - name: 최신 스캔 결과 읽기
+      slurp:
+        src: "{{ (scan_files.files | sort(attribute='mtime') | last).path }}"
+      register: scan_content
+      when: collect_results and scan_files.matched > 0
+      tags: results
+    
+    - name: 스캔 결과 저장 (로컬)
+      local_action:
+        module: copy
+        content: "{{ scan_content.content | b64decode }}"
+        dest: "./scan_results/{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.{{ results_format }}"
+      when: collect_results and scan_content is defined
+      tags: results
+
+  post_tasks:
+    - name: 스캔 완료 로그
+      debug:
+        msg: |
+          ✅ 스캔 완료: {{ inventory_hostname }}
+          타입: {{ scan_type }}
+          시간: {{ ansible_date_time.iso8601 }}
+          {% if scan_type == 'full' and full_scan_job is defined %}
+          결과: {{ 'SUCCESS' if full_scan_job.rc == 0 else 'FAILED' }}
+          {% elif scan_type == 'quick' and quick_scan_job is defined %}
+          결과: {{ 'SUCCESS' if quick_scan_job.rc == 0 else 'FAILED' }}
+          {% elif scan_type == 'custom' and custom_scan_job is defined %}
+          결과: {{ 'SUCCESS' if custom_scan_job.rc == 0 else 'FAILED' }}
+          {% endif %}
+      tags: always
+    
+    # 실패한 스캔 알림
+    - name: 스캔 실패 경고
+      debug:
+        msg: |
+          ⚠️  스캔 실패: {{ inventory_hostname }}
+          오류: {{ scan_job.stderr | default('Unknown error') }}
+      when: 
+        - (full_scan_job is defined and full_scan_job.rc != 0) or
+          (quick_scan_job is defined and quick_scan_job.rc != 0) or
+          (custom_scan_job is defined and custom_scan_job.rc != 0)
+      tags: always
+
+# 스캔 결과 종합 리포트
+- name: 스캔 결과 종합 리포트
+  hosts: localhost
+  gather_facts: no
+  run_once: true
+  tasks:
+    - name: 결과 디렉토리 생성
+      file:
+        path: ./scan_results
+        state: directory
+      when: collect_results | default(true)
+      tags: results
+    
+    - name: 스캔 요약 리포트 생성
+      template:
+        src: templates/scan_report.j2
+        dest: "./scan_results/scan_summary_{{ ansible_date_time.epoch }}.html"
+      vars:
+        scan_start_time: "{{ ansible_date_time.iso8601 }}"
+        total_servers: "{{ groups['all'] | length }}"
+        scanned_servers: "{{ ansible_play_hosts | length }}"
+      when: collect_results | default(true)
+      tags: results
+    
+    - name: 전체 스캔 요약
+      debug:
+        msg: |
+          
+          📋 infra-auditor 스캔 완료 요약
+          =====================================
+          
+          스캔 타입: {{ scan_type }}
+          총 서버: {{ groups['all'] | length }}
+          스캔 완료: {{ ansible_play_hosts | length }}
+          배치 크기: {{ scan_batch_size }}
+          
+          지역별 현황:
+          {% for region in ['us', 'eu', 'kr', 'sg'] %}
+          {% if groups.get(region) %}
+          - {{ region | upper }}: {{ groups[region] | length }}개 서버
+          {% endif %}
+          {% endfor %}
+          
+          스캔 시간: {{ ansible_date_time.iso8601 }}
+          
+          {% if collect_results %}
+          결과 파일: ./scan_results/
+          {% endif %}
+      tags: always
+    
+    # Slack 알림 (설정된 경우)
+    - name: Slack 알림 발송
+      uri:
+        url: "{{ slack_webhook_url }}"
+        method: POST
+        body_format: json
+        body:
+          text: |
+            🔍 Infra Auditor 스캔 완료
+            
+            • 스캔 타입: {{ scan_type }}
+            • 서버 수: {{ ansible_play_hosts | length }}/{{ groups['all'] | length }}
+            • 시간: {{ ansible_date_time.iso8601 }}
+            
+            {% if collect_results %}
+            결과 수집: ✅ 완료
+            {% endif %}
+      when: 
+        - notify_completion | bool
+        - slack_webhook_url is defined
+      ignore_errors: yes
+      tags: notify

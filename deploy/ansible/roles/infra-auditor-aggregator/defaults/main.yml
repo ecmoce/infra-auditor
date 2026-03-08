@@ -1,0 +1,100 @@
+---
+# infra-auditor-aggregator 기본 설정
+
+# 공통 설정 (agent와 공유)
+github_release_base_url: "https://github.com/ecmoce/infra-auditor/releases/latest/download"
+download_timeout: 300
+
+# 아키텍처 매핑
+arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: arm
+  amd64: amd64
+  arm64: arm64
+
+# 필수 패키지
+required_packages:
+  - curl
+  - tar
+  - gzip
+
+# Aggregator 전용 패키지
+aggregator_packages:
+  - nginx
+  - sqlite3
+  - logrotate
+
+# Aggregator 바이너리 설정
+aggregator_binary_name: infra-auditor-aggregator
+aggregator_binary_path: /usr/local/bin/{{ aggregator_binary_name }}
+aggregator_config_path: /etc/infra-auditor/aggregator.yml
+aggregator_data_path: /var/lib/infra-auditor
+aggregator_log_path: /var/log/infra-auditor
+
+# 서비스 설정
+service_name: infra-auditor-aggregator
+service_user: infra-auditor
+service_group: infra-auditor
+
+# HTTP 서버 설정
+aggregator_port: 8080
+aggregator_bind_address: 0.0.0.0
+
+# nginx 설정
+install_nginx: true
+nginx_config_path: /etc/nginx/sites-available/infra-auditor-aggregator
+nginx_config_enabled_path: /etc/nginx/sites-enabled/infra-auditor-aggregator
+nginx_port: 80
+nginx_ssl_port: 443
+
+# SSL 설정 (기본값)
+enable_ssl: false
+ssl_cert_path: /etc/ssl/certs/infra-auditor.crt
+ssl_key_path: /etc/ssl/private/infra-auditor.key
+
+# 데이터베이스 설정
+db_type: sqlite
+db_file: "{{ aggregator_data_path }}/aggregator.db"
+
+# 백업 설정
+backup_enabled: true
+backup_retention_days: 30
+backup_schedule: "0 3 * * *"
+backup_stop_service: false
+backup_notifications: false
+
+# 로그 설정
+log_level: info
+log_rotation_size: "100M"
+log_retention_days: 30
+
+# 성능 설정
+max_connections: 100
+request_timeout: 30
+memory_limit: 1024
+worker_count: 0
+
+# 기능 설정
+collection_interval: 15
+collection_batch_size: 1000
+data_retention_days: 90
+metrics_enabled: true
+dashboard_enabled: true
+dashboard_path: /
+dashboard_static_path: /var/lib/infra-auditor/static
+cache_enabled: true
+cache_size: 100
+cache_ttl: 3600
+
+# 알림 설정
+notifications_enabled: false
+slack_enabled: false
+email_enabled: false
+
+# API 토큰 설정
+api_tokens_enabled: true
+api_tokens: []
+
+# 헬스체크 설정
+run_health_check: true

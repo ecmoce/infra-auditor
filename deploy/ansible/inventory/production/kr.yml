@@ -1,0 +1,53 @@
+---
+# 한국 리전 인벤토리
+all:
+  children:
+    control:
+      hosts:
+        ctrl-kr-01:
+          ansible_host: "{{ ctrl_kr_01_ip | default('10.3.1.10') }}"
+          role: control
+        ctrl-kr-02:
+          ansible_host: "{{ ctrl_kr_02_ip | default('10.3.1.11') }}"
+          role: control
+      vars:
+        region: korea
+        
+    compute:
+      hosts:
+        cmp-kr-[01:50]:
+          ansible_host: "10.3.2.{{ item }}"
+          role: compute
+      vars:
+        region: korea
+        
+    network:
+      hosts:
+        net-kr-[01:10]:
+          ansible_host: "10.3.3.{{ item }}"
+          role: network
+      vars:
+        region: korea
+        
+    storage_ceph:
+      hosts:
+        sto-kr-[01:30]:
+          ansible_host: "10.3.4.{{ item }}"
+          role: storage-ceph
+      vars:
+        region: korea
+        
+    storage_s3:
+      hosts:
+        s3-kr-[01:10]:
+          ansible_host: "10.3.5.{{ item }}"
+          role: storage-s3
+      vars:
+        region: korea
+        
+  vars:
+    ansible_user: root
+    ansible_ssh_private_key_file: "{{ kr_ssh_key | default('~/.ssh/kr-servers') }}"
+    aggregator_url: "{{ kr_aggregator_url | default('https://aggregator-kr.infra.company.com') }}"
+    region_code: kr
+    timezone: Asia/Seoul
